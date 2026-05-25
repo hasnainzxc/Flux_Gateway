@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from structlog import get_logger
 
+from src.api.v1.agent import router as agent_router
 from src.api.v1.api_keys import router as api_keys_router
 from src.api.v1.auth import router as auth_router
 from src.api.v1.connections import router as connections_router
@@ -61,6 +62,7 @@ app.include_router(connections_router, prefix="/api/v1")
 app.include_router(schema_router, prefix="/api/v1")
 app.include_router(query_router, prefix="/api/v1")
 app.include_router(rag_router, prefix="/api/v1")
+app.include_router(agent_router, prefix="/api/v1")
 
 
 @app.get("/health")
