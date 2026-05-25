@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
 from src.agents.state import AgentState
@@ -8,7 +10,9 @@ from src.services.llm import llm_complete
 logger = structlog.get_logger(__name__)
 
 
-async def classify_intent_node(state: AgentState) -> dict:
+async def classify_intent_node(
+    state: AgentState, config: dict[str, Any] | None = None
+) -> dict:
     messages = [
         {
             "role": "system",
@@ -22,9 +26,12 @@ async def classify_intent_node(state: AgentState) -> dict:
         {"role": "user", "content": state["user_query"]},
     ]
 
-    response = await llm_complete(messages, model="openai/gpt-4o-mini", temperature=0.0, max_tokens=10)
+    response, tokens = await llm_complete(
+        messages, model="openai/gpt-4o-mini", temperature=0.0, max_tokens=10
+    )
     intent_raw = response.strip().lower()
 
+    intent: str
     if intent_raw == "write":
         intent = "write"
     elif intent_raw == "read":
@@ -36,8 +43,8 @@ async def classify_intent_node(state: AgentState) -> dict:
 
     return {
         "intent": intent,
-        "tokens_used": state.get("tokens_used", 0) + 50,
+        "tokens_used": state.get("tokens_used", 0) + tokens,
         "node_traces": [
-            {"node": "classify_intent", "intent": intent, "model": "gpt-4o-mini"}
+            {"node": "classify_intent", "intent": intent, "model": "gpt-4o-mini", "tokens": tokens}
         ],
     }

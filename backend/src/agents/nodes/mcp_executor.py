@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
 from src.agents.state import AgentState
@@ -7,7 +9,9 @@ from src.agents.state import AgentState
 logger = structlog.get_logger(__name__)
 
 
-async def mcp_exec_node(state: AgentState) -> dict:
+async def mcp_exec_node(
+    state: AgentState, config: dict[str, Any] | None = None
+) -> dict:
     code = state.get("generated_code", "")
     target_system = state.get("target_system", "unknown")
 

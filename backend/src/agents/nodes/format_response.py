@@ -7,7 +7,9 @@ from src.agents.state import AgentState
 logger = structlog.get_logger(__name__)
 
 
-async def format_response_node(state: AgentState) -> dict:
+async def format_response_node(
+    state: AgentState, config: dict | None = None
+) -> dict:
     intent = state.get("intent", "read")
     final_response = state.get("final_response") or ""
     error = state.get("error") or ""
@@ -19,9 +21,7 @@ async def format_response_node(state: AgentState) -> dict:
     if error and not final_response:
         final_response = error
 
-    if intent == "read" and citations:
-        enriched_response = final_response
-    elif intent == "write" and execution_result:
+    if intent == "write" and execution_result:
         result_status = execution_result.get("status", "unknown")
         enriched_response = f"{final_response}\n\n[Execution: {result_status}]"
     else:

@@ -69,7 +69,7 @@ async def schema_query(
         {"role": "user", "content": payload.prompt},
     ]
 
-    answer = await llm_complete(messages)
+    answer, tokens_used = await llm_complete(messages)
     elapsed = (time_module.perf_counter() - start) * 1000
 
     await log_audit_event(
@@ -78,6 +78,7 @@ async def schema_query(
         details={
             "prompt": payload.prompt[:500],
             "connection_id": payload.connection_id,
+            "tokens_used": tokens_used,
             "latency_ms": round(elapsed, 2),
         },
         ip_address=request.client.host if request.client else "",
@@ -86,5 +87,6 @@ async def schema_query(
 
     return QueryResponse(
         answer=answer,
+        tokens_used=tokens_used,
         latency_ms=round(elapsed, 2),
     )

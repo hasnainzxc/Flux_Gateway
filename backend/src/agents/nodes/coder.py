@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import structlog
 
@@ -10,7 +11,9 @@ from src.services.llm import llm_complete_json
 logger = structlog.get_logger(__name__)
 
 
-async def coder_node(state: AgentState) -> dict:
+async def coder_node(
+    state: AgentState, config: dict[str, Any] | None = None
+) -> dict:
     schema_graph = state.get("schema_graph") or {}
     query = state["user_query"]
 
@@ -23,8 +26,9 @@ async def coder_node(state: AgentState) -> dict:
                 "You are a SQL generator. Generate parameterized queries ($1, $2, ...).\n"
                 "Use ONLY table and column names from the provided schema.\n"
                 "Never invent column names. Never use raw string interpolation.\n"
-                "Wrap identifiers with double quotes: \"table_name\".\"column_name\"\n"
-                "Return JSON: {\"sql\": \"query\", \"explanation\": \"what it does\", \"target_system\": \"postgresql\", \"parameters\": [\"val1\", \"val2\"]}"
+                "Wrap identifiers with double quotes.\n"
+                "Return JSON: {\"sql\": \"query\", \"explanation\": \"what it does\", "
+                "\"target_system\": \"postgresql\", \"parameters\": [\"val1\", \"val2\"]}"
             ),
         },
         {
@@ -33,7 +37,7 @@ async def coder_node(state: AgentState) -> dict:
         },
     ]
 
-    result = await llm_complete_json(messages, model="openai/gpt-4o")
+    result, tokens = await llm_complete_json(messages, model="openai/gpt-4o")
 
     generated_code = result.get("sql", "")
     target_system = result.get("target_system", "postgresql")
@@ -43,13 +47,14 @@ async def coder_node(state: AgentState) -> dict:
     return {
         "generated_code": generated_code,
         "target_system": target_system,
-        "tokens_used": state.get("tokens_used", 0) + 500,
+        "tokens_used": state.get("tokens_used", 0) + tokens,
         "node_traces": [
             {
                 "node": "coder",
                 "code_length": len(generated_code),
                 "target": target_system,
                 "model": "gpt-4o",
+                "tokens": tokens,
             }
         ],
     }
