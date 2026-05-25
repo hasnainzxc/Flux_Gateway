@@ -8,7 +8,9 @@ from src.services.llm import llm_complete
 logger = structlog.get_logger(__name__)
 
 
-async def self_heal_node(state: AgentState) -> dict:
+async def self_heal_node(
+    state: AgentState, config: dict | None = None
+) -> dict:
     code = state.get("generated_code", "") or ""
     errors = state.get("review_errors", [])
     retry_count = state.get("retry_count", 0) + 1
@@ -18,8 +20,14 @@ async def self_heal_node(state: AgentState) -> dict:
         logger.warning("self_heal_max_retries", retries=retry_count)
         return {
             "retry_count": retry_count,
-            "error": f"Max retries ({max_retries}) exceeded. Last errors: {'; '.join(errors)}",
-            "final_response": f"Unable to generate a safe query after {max_retries} attempts. Errors: {'; '.join(errors)}",
+            "error": (
+                f"Max retries ({max_retries}) exceeded. "
+                f"Last errors: {'; '.join(errors)}"
+            ),
+            "final_response": (
+                f"Unable to generate a safe query after {max_retries} attempts. "
+                f"Errors: {'; '.join(errors)}"
+            ),
             "node_traces": [
                 {
                     "node": "self_heal",
@@ -50,7 +58,7 @@ async def self_heal_node(state: AgentState) -> dict:
         },
     ]
 
-    fixed_code = await llm_complete(messages, model="openai/gpt-4o", max_tokens=2000)
+    fixed_code, tokens = await llm_complete(messages, model="openai/gpt-4o", max_tokens=2000)
     fixed_code = fixed_code.strip()
 
     logger.info("self_heal_applied", retry=retry_count, new_len=len(fixed_code))
@@ -60,13 +68,14 @@ async def self_heal_node(state: AgentState) -> dict:
         "retry_count": retry_count,
         "review_passed": False,
         "review_errors": [],
-        "tokens_used": state.get("tokens_used", 0) + 300,
+        "tokens_used": state.get("tokens_used", 0) + tokens,
         "node_traces": [
             {
                 "node": "self_heal",
                 "retry": retry_count,
                 "new_code_length": len(fixed_code),
                 "model": "gpt-4o",
+                "tokens": tokens,
             }
         ],
     }

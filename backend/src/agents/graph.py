@@ -61,7 +61,6 @@ def build_agent_graph() -> StateGraph:
     )
 
     workflow.add_edge("researcher_node", "format_response_node")
-
     workflow.add_edge("coder_node", "reviewer_node")
 
     workflow.add_conditional_edges(
@@ -86,6 +85,3 @@ def build_agent_graph() -> StateGraph:
     workflow.add_edge("format_response_node", END)
 
     return workflow.compile()
-
-
-agent_graph = build_agent_graph()

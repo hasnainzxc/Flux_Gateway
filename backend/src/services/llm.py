@@ -24,7 +24,7 @@ async def llm_complete(
     model: str = "openai/gpt-4o-mini",
     temperature: float = 0.3,
     max_tokens: int = 2000,
-) -> str:
+) -> tuple[str, int]:
     client = get_openrouter_client()
     response = await client.chat.completions.create(
         model=model,
@@ -32,15 +32,16 @@ async def llm_complete(
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    content = response.choices[0].message.content
-    return content or ""
+    content = response.choices[0].message.content or ""
+    tokens = response.usage.total_tokens if response.usage else 0
+    return content, tokens
 
 
 async def llm_complete_json(
     messages: list[dict[str, str]],
     model: str = "openai/gpt-4o-mini",
     temperature: float = 0.0,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], int]:
     client = get_openrouter_client()
     response = await client.chat.completions.create(
         model=model,
@@ -49,9 +50,10 @@ async def llm_complete_json(
         response_format={"type": "json_object"},
     )
     content = response.choices[0].message.content
+    tokens = response.usage.total_tokens if response.usage else 0
     import json
 
-    return json.loads(content) if content else {}
+    return (json.loads(content) if content else {}), tokens
 
 
 async def generate_embeddings(

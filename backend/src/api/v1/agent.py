@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents.graph import agent_graph
+from src.agents.graph import build_agent_graph
 from src.agents.state import AgentState
 from src.api.deps import require_tenant
 from src.core.security_middleware import check_rate_limit, log_audit_event
@@ -28,16 +28,6 @@ class AgentQueryRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
-class CitationResponse(BaseModel):
-    index: int
-    chunk_id: str
-    document_id: str
-    score: float
-    excerpt: str
-
-    model_config = {"extra": "allow"}
-
-
 class AgentQueryResponse(BaseModel):
     answer: str
     intent: str
@@ -49,6 +39,29 @@ class AgentQueryResponse(BaseModel):
     node_traces: list[dict] = []
 
     model_config = {"extra": "allow"}
+
+
+async def _load_schema_graph(
+    session: AsyncSession, connection_id: str
+) -> dict | None:
+    result = await session.execute(
+        select(SchemaCache)
+        .where(SchemaCache.connection_id == connection_id)
+        .order_by(SchemaCache.created_at.desc())
+        .limit(1)
+    )
+    cache = result.scalar_one_or_none()
+    if cache:
+        try:
+            return json.loads(cache.schema_graph)
+        except (json.JSONDecodeError, TypeError):
+            import structlog
+
+            structlog.get_logger(__name__).warning(
+                "malformed_schema_cache",
+                connection_id=connection_id,
+            )
+    return None
 
 
 @router.post("/query", response_model=AgentQueryResponse)
@@ -65,18 +78,7 @@ async def agent_query(
 
     schema_graph = None
     if payload.connection_id:
-        result = await session.execute(
-            select(SchemaCache)
-            .where(SchemaCache.connection_id == payload.connection_id)
-            .order_by(SchemaCache.created_at.desc())
-            .limit(1)
-        )
-        cache = result.scalar_one_or_none()
-        if cache:
-            try:
-                schema_graph = json.loads(cache.schema_graph)
-            except (json.JSONDecodeError, TypeError):
-                schema_graph = None
+        schema_graph = await _load_schema_graph(session, payload.connection_id)
 
     initial_state: AgentState = {
         "tenant_id": tenant_id,
@@ -101,8 +103,10 @@ async def agent_query(
         "node_traces": [],
     }
 
-    result_state = await agent_graph.ainvoke(initial_state)
-
+    graph = build_agent_graph()
+    result_state = await graph.ainvoke(
+        initial_state, config={"configurable": {"session": session}}
+    )
     elapsed = (time.perf_counter() - start) * 1000
 
     await log_audit_event(
@@ -140,7 +144,7 @@ async def get_agent_query(
     return {
         "query_id": query_id,
         "status": "not_implemented",
-        "message": "Agent query history will be persisted in a future update",
+        "message": "Agent query history will be persisted in Stage 3",
     }
 
 
@@ -150,5 +154,5 @@ async def list_agent_queries(
 ) -> dict:
     return {
         "queries": [],
-        "message": "Agent query history will be persisted in a future update",
+        "message": "Agent query history will be persisted in Stage 3",
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import structlog
 
@@ -33,7 +34,10 @@ def _check_dangerous_ops(code: str) -> list[str]:
 def _check_parameterized(code: str) -> list[str]:
     if re.search(r"\$\d+", code):
         return []
-    if re.search(r"SELECT\b", code, re.IGNORECASE) and not re.search(r"(INSERT|UPDATE|DELETE)", code, re.IGNORECASE):
+    is_read_only = re.search(
+        r"SELECT\b", code, re.IGNORECASE
+    ) and not re.search(r"(INSERT|UPDATE|DELETE)", code, re.IGNORECASE)
+    if is_read_only:
         return []
     return ["Non-parameterized write query. Use $1, $2 notation for values."]
 
@@ -60,14 +64,12 @@ def _check_columns_exist(code: str, schema_graph: dict) -> list[str]:
                 f"Available: {sorted(valid_columns[tbl_lower])}"
             )
 
-    bare_assignments = re.findall(r'SET\s+(\w+)\s*=', code, re.IGNORECASE)
-    bare_assignments += re.findall(r'WHERE\s+(\w+)\s*[=<>]', code, re.IGNORECASE)
-    bare_assignments += re.findall(r'WHERE\s+\w+\s+[=<>]\s*\w+\s+AND\s+(\w+)\s*', code, re.IGNORECASE)
-
     return errors
 
 
-async def reviewer_node(state: AgentState) -> dict:
+async def reviewer_node(
+    state: AgentState, config: dict[str, Any] | None = None
+) -> dict:
     code = state.get("generated_code", "") or ""
     schema_graph = state.get("schema_graph") or {}
 
