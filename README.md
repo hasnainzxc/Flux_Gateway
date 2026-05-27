@@ -95,29 +95,67 @@ __start__ → classify_intent (gpt-4o-mini)
 ## Getting Started
 
 ### Prerequisites
-- Python 3.12+, Node 22+, Docker
+- Python 3.12+, Node 22+, Docker (Docker Compose v2+)
 
-### Development
+### Quick Start (Backend)
 
 ```bash
-# Start services
-docker compose up -d
+# Clone & enter
+cd Flux_gateway
 
-# Run migrations
-cd backend && alembic upgrade head
+# Copy env template
+cp .env.template .env
 
-# Install deps
+# Start PostgreSQL 16 + pgvector + Redis
+docker compose up -d postgres redis
+
+# Wait for health checks
+docker compose ps
+
+# Install Python deps
+cd backend
 pip install -e ".[dev]"
 
-# Start backend
-uvicorn src.main:app --reload
+# Run DB migrations
+alembic upgrade head
 
-# Run tests
-pytest
+# Start FastAPI server
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-# Lint
-ruff check .
-mypy .
+### Running Everything with Docker
+
+```bash
+# Start all services (PG, Redis, FastAPI)
+docker compose up -d
+
+# API available at http://localhost:8000
+# Swagger docs at http://localhost:8000/docs
+```
+
+### Frontend (Stage 2 Week 8)
+
+```bash
+cd frontend
+npm install
+npm run dev    # http://localhost:3000
+```
+
+### Commands Quick Reference
+
+```bash
+# Backend lint & typecheck
+cd backend
+ruff check src/           # Lint
+mypy --ignore-missing-imports src/   # Type check
+pytest                    # Run tests
+alembic upgrade head      # Apply migrations
+alembic revision --autogenerate -m "desc"  # Create migration
+
+# Frontend lint & typecheck
+cd frontend
+npx eslint src/
+npx tsc --noEmit
 ```
 
 ### API Endpoints
@@ -139,6 +177,7 @@ mypy .
 | `POST` | `/api/v1/rag/search` | Hybrid search |
 | `POST` | `/api/v1/rag/ask` | RAG + LLM answer with citations |
 | `POST` | `/api/v1/agent/query` | LangGraph agent query (full pipeline) |
+| `POST` | `/api/v1/sandbox/execute` | Execute code in Docker sandbox |
 
 ## Status
 
@@ -147,8 +186,9 @@ mypy .
 | Stage 1: Core | W1-4 | Complete |
 | Stage 2: Product | W5-6 | Complete (RAG + Hybrid Search) |
 | Stage 2: Product | W7 | Complete (LangGraph Agent) |
-| Stage 2: Product | W8 | Next (Frontend Dashboard) |
-| Stage 3: Scale | W9-12 | Pending |
+| Stage 2: Product | W8 | Complete (Frontend Dashboard) |
+| Stage 3: Scale | W9 | Complete (Docker Sandbox) |
+| Stage 3: Scale | W10-12 | Pending |
 
 ## License
 

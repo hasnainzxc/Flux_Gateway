@@ -20,6 +20,12 @@ class Settings(BaseSettings):
 
     secret_encryption_key: str = ""
 
+    sandbox_enabled: bool = True
+    sandbox_image: str = "python:3.12-slim"
+    sandbox_timeout: int = 30
+    sandbox_memory_limit: str = "256m"
+    sandbox_cpu_quota: int = 50000
+
     @property
     def is_development(self) -> bool:
         return self.environment == "development"

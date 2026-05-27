@@ -16,6 +16,7 @@ from src.api.v1.auth import router as auth_router
 from src.api.v1.connections import router as connections_router
 from src.api.v1.query import router as query_router
 from src.api.v1.rag import router as rag_router
+from src.api.v1.sandbox import router as sandbox_router
 from src.api.v1.schema_endpoints import router as schema_router
 from src.core.config import settings
 
@@ -63,6 +64,7 @@ app.include_router(schema_router, prefix="/api/v1")
 app.include_router(query_router, prefix="/api/v1")
 app.include_router(rag_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
+app.include_router(sandbox_router, prefix="/api/v1")
 
 
 @app.get("/health")
