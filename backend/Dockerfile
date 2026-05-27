@@ -2,10 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
+ENV PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=5
 
 COPY pyproject.toml .
-RUN uv pip install --system -e ".[dev]"
+RUN pip install --no-cache-dir -e ".[dev]"
 
 COPY . .
 
