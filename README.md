@@ -1,252 +1,566 @@
+<div align="center">
+
 # Flux Gateway
 
-> Data-to-Agent Gateway — B2B SaaS. Zapier for Agentic Context.
+### Data-to-Agent Gateway for B2B SaaS
 
-Companies paste a DB connection string or API URL → platform auto-maps schema, indexes documents, deploys a secure NL agent that reads data and executes validated write-backs. No custom integration code needed.
+**Paste a DB connection string. Get a secure AI agent that reads, writes, and automates your data.**
+
+[Quick Start](#quick-start) · [Architecture](#architecture) · [API Reference](#api-reference) · [Documentation](#documentation)
+
+---
+
+![Status](https://img.shields.io/badge/status-Stage%203%20Complete-blue)
+![Python](https://img.shields.io/badge/python-3.12+-green)
+![Next.js](https://img.shields.io/badge/next.js-16.2.6-black)
+![PostgreSQL](https://img.shields.io/badge/postgres-16+pgvector-blue)
+![Redis](https://img.shields.io/badge/redis-7-red)
+![License](https://img.shields.io/badge/license-Proprietary-gray)
+
+</div>
+
+---
+
+## What is Flux Gateway?
+
+Flux Gateway turns any PostgreSQL database into an AI-powered automation platform in minutes — not months.
+
+**Connect** → paste a connection string, platform auto-maps your schema  
+**Query** → ask questions in natural language, get answers with SQL citations  
+**Automate** → webhooks trigger autonomous agent workflows via behavior rules  
+**Monitor** → real-time WebSocket event feed with full audit trail  
+
+No custom integration code. No ETL pipelines. No vendor lock-in.
 
 ---
 
 ## Architecture
 
 ```
-Client Infra (DBs, Docs, Apps)
-        │
-        ▼
-┌─────────────────────────────────────────────┐
-│              Flux Gateway Platform           │
-│                                              │
-│  FastAPI Gateway (Auth, Rate Limit, Tenancy) │
-│  ┌──────────┐ ┌──────┐ ┌──────────────────┐ │
-│  │ Schema   │ │ RAG  │ │ Agent Sandbox    │ │
-│  │ Engine   │ │Engine│ │ (LangGraph 7-node)│ │
-│  └──────────┘ └──────┘ └──────────────────┘ │
-│  ┌──────────────────────────────────────────┐│
-│  │        Event Gateway (WebSockets)        ││
-│  └──────────────────────────────────────────┘│
-│                                              │
-│  PostgreSQL 16 + pgvector   │   Redis 7      │
-│  (Tenant Data, Vectors,     │   (Cache,      │
-│   Event Log, Credentials)   │    Pub/Sub)    │
-└─────────────────────────────────────────────┘
-        │
-        ▼
-Next.js 16 Dashboard (shadcn/ui, Magic UI, Motion.dev, Geist)
+┌─────────────────────────────────────────────────────────────────┐
+│                        External Systems                          │
+│         Odoo · HubSpot · Stripe · Custom Webhooks               │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ Webhooks (HMAC-SHA256)
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Flux Gateway Platform                       │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              FastAPI Gateway (Port 8000)                   │   │
+│  │  Auth MW · Rate Limit · Tenant Isolation · Audit Log      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌────────────┐  ┌──────────┐  ┌────────────┐  ┌────────────┐  │
+│  │   Schema   │  │   RAG    │  │   Agent    │  │   Event    │  │
+│  │   Engine   │  │  Engine  │  │  Sandbox   │  │  Gateway   │  │
+│  │            │  │          │  │            │  │            │  │
+│  │ Reflection │  │ Ingest   │  │ LangGraph  │  │ WebSockets │  │
+│  │ Cache      │  │ Hybrid   │  │ 7-Node     │  │ Webhooks   │  │
+│  │ Graph      │  │ Search   │  │ Pipeline   │  │ ARQ Workers│  │
+│  └────────────┘  └──────────┘  └────────────┘  └────────────┘  │
+│                                                                  │
+│  ┌─────────────────────────┐    ┌────────────────────────────┐  │
+│  │  PostgreSQL 16 + pgvector│    │         Redis 7            │  │
+│  │                          │    │                            │  │
+│  │  10 Tables · 3 Migrations│    │  Schema Cache (1hr TTL)    │  │
+│  │  Tenant Isolation (RLS)  │    │  Pub/Sub (per-tenant)      │  │
+│  │  Encrypted Credentials   │    │  Rate Limit (100/60s)      │  │
+│  │  Vector Embeddings       │    │  ARQ Job Queue             │  │
+│  └─────────────────────────┘    └────────────────────────────┘  │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              Docker Sandbox Engine                         │   │
+│  │  Ephemeral containers · No network · tmpfs · 30s timeout  │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Next.js 16 Dashboard (Port 3000)               │
+│                                                                  │
+│  Dashboard · Connections · Schema · Chat · Documents · Events    │
+│  Webhooks · Settings · Usage/Billing                             │
+│                                                                  │
+│  Tailwind v4 · shadcn/ui (29 components) · Motion · React Query │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## LangGraph Agent Topology
+---
+
+## LangGraph Agent Pipeline
 
 ```
-__start__ → classify_intent (gpt-4o-mini)
-  ├─ intent=read  → researcher_node (hybrid RAG + LLM) → format_response → __end__
-  └─ intent=write → coder_node (schema-grounded SQL)
-                     → reviewer_node (rule-based validation)
-                       ├─ pass → mcp_exec_node (JSON-RPC 2.0) → format_response → __end__
-                       └─ fail → self_heal_node (LLM fix, max 3 retries)
-                                   ├─ retry → coder_node
-                                   └─ exhausted → format_response (error) → __end__
+__start__
+    │
+    ▼
+classify_intent ──── GPT-4o-mini classifies: read / write / unknown
+    │
+    ├── intent=read ──→ researcher_node ──→ format_response ──→ __end__
+    │                     │
+    │                     ├── Hybrid search (pgvector cosine + BM25 + RRF)
+    │                     ├── Schema-grounded context injection
+    │                     └── Citation tracking
+    │
+    ├── intent=write ─→ coder_node ──→ reviewer_node
+    │                     │                │
+    │                     │                ├── pass ──→ mcp_exec_node ──→ format_response
+    │                     │                │
+    │                     │                └── fail ──→ self_heal_node (max 3 retries)
+    │                     │                              │
+    │                     │                              └── retry ──→ coder_node
+    │                     │
+    │                     └── Docker sandbox validation
+    │                         (no network, tmpfs, 30s timeout)
+    │
+    └── intent=unknown ──→ format_response ──→ __end__
 ```
 
-## Stack
+---
+
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python 3.12, FastAPI, SQLAlchemy async, Alembic |
-| AI/ML | OpenRouter (GPT-4o / GPT-4o-mini), SentenceTransformers |
-| Orchestration | LangGraph (7-node state machine) |
-| Database | PostgreSQL 16 + pgvector (pgvector) |
-| Cache/PubSub | Redis 7 (token bucket rate limiter, schema cache, BM25 index) |
-| Search | pgvector cosine + BM25 lexical + Reciprocal Rank Fusion |
-| Auth | Dual-mode: API keys (hashed, `sk-` prefix) + OIDC/JWT |
-| Frontend | Next.js 16, Tailwind v4, shadcn/ui, Magic UI, Motion.dev, Geist font |
-| Testing | pytest-asyncio, Playwright MCP (E2E) |
-| Infra | Docker Compose (PG, Redis, FastAPI) |
+| **Backend** | Python 3.12, FastAPI, SQLAlchemy async, Alembic |
+| **AI/ML** | OpenRouter (GPT-4o / GPT-4o-mini), SentenceTransformers (fallback) |
+| **Orchestration** | LangGraph (7-node state machine with self-healing) |
+| **Database** | PostgreSQL 16 + pgvector (cosine similarity search) |
+| **Cache/Queue** | Redis 7 (schema cache, pub/sub, rate limiting, ARQ job queue) |
+| **Workers** | ARQ (async Redis queue, 10 concurrent jobs, 3 retries) |
+| **Search** | pgvector cosine + BM25 lexical + Reciprocal Rank Fusion |
+| **Auth** | Dual-mode: API keys (SHA-256 hashed) + OIDC/JWT |
+| **Frontend** | Next.js 16, React 19, Tailwind v4, shadcn/ui, Motion, React Query |
+| **Sandbox** | Docker ephemeral containers (no network, tmpfs, 256MB, 30s) |
+| **Infra** | Docker Compose (PG, Redis, FastAPI, ARQ workers) |
 
-## Security
+---
 
-- **Tenant isolation**: Triple-layer — DB Row-Level Security → ORM listener → FastAPI dependency
-- **Credentials**: AES-256-GCM encryption at rest (Fernet)
-- **Sandbox**: Docker ephemeral containers (no network, tmpfs, 30s timeout, `no-new-privileges`)
-- **Rate limiting**: Redis token bucket (100 req/60s per tenant)
-- **Audit**: Every action logged with tenant_id, IP, user-agent
+## Security Model
 
-## Project Structure
+| Layer | Mechanism |
+|-------|-----------|
+| **Tenant Isolation** | Triple-layer: DB Row-Level Security → SQLAlchemy ORM listener → FastAPI dependency injection |
+| **Credentials** | Fernet symmetric encryption (AES-128-CBC) at rest |
+| **Sandbox** | Docker containers: no network access, tmpfs-only filesystem, 30s timeout, `no-new-privileges` |
+| **Rate Limiting** | Redis token bucket: 100 requests/60s per tenant |
+| **API Keys** | SHA-256 hashed, `sk-` prefix, expiry enforcement |
+| **Webhooks** | HMAC-SHA256 signature verification |
+| **Audit** | Every action logged with tenant_id, IP, user-agent, timestamp |
 
-```
-.
-├── docker-compose.yml
-├── backend/
-│   ├── pyproject.toml
-│   ├── alembic.ini
-│   └── src/
-│       ├── main.py                  # FastAPI app entry
-│       ├── core/                    # config, security, tenant, oidc, middleware
-│       ├── db/                      # models, session, migrations, tenant isolation
-│       ├── api/v1/                  # auth, api_keys, connections, schema, query, rag, agent
-│       ├── agents/                  # state, graph, nodes (classify, research, code, review, etc.)
-│       └── services/               # schema_reflection, schema_cache, llm, rag_ingestion, rag_query
-├── docs/
-│   ├── architecture/               # system-overview, agent-topology, security-model, data-flow
-│   ├── modules/                    # schema-engine, rag-engine, sandbox-execution, event-gateway, sdk
-│   ├── frontend/                   # routes, ui-components
-│   └── roadmap/                    # stage-1-core, stage-2-product, stage-3-scale, future-goals
-└── frontend/                       # (Week 8 — Next.js 16 dashboard)
-```
+---
 
-## Documentation
+## Quick Start
 
-- **[MASTER_GUIDE.md](docs/MASTER_GUIDE.md)** — Full architecture, decision rationale, security model, agent topology, dev→prod evolution, API reference
-- **[PROJECT_PLAN.md](PROJECT_PLAN.md)** — Original 12-week implementation plan
-- **[docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)** — What's built now, what's next
-- **[docs/architecture/](docs/architecture/)** — System overview, agent topology, security model, data flow
-- **[docs/modules/](docs/modules/)** — Schema engine, RAG engine, sandbox, event gateway, SDK specs
-- **[docs/roadmap/](docs/roadmap/)** — Stage 1/2/3 task lists, future goals
-
-## How to Run Everything
-
-### 1. Prerequisites
+### Prerequisites
 
 ```bash
-Python 3.12+    # python --version
-Node 22+        # node --version
-Docker v24+     # docker --version (with Compose v2)
+Python 3.12+      # python --version
+Node.js 22+       # node --version
+Docker v24+       # docker --version (with Compose v2)
 ```
 
-### 2. Quick Start (All-In-One Docker)
+### 1. Clone and Configure
 
 ```bash
-cd Flux_gateway
+git clone <repo-url> && cd Flux_gateway
 
-# Copy env if missing
+# Create environment file
 cp .env.template .env
-
-# Edit .env — set at minimum:
-#   OPENROUTER_API_KEY=sk-or-v1-...
-#   OIDC_ISSUER=https://accounts.google.com  (or skip for API-key-only)
-
-# Start everything: Postgres + pgvector + Redis + FastAPI backend
-docker compose up -d
-
-# Check health
-docker compose ps          # all should be "healthy" / "Up"
-docker compose logs backend  # verify no startup errors
-
-# Apply DB migrations
-docker compose exec backend alembic upgrade head
-
-# API: http://localhost:8000
-# Swagger: http://localhost:8000/docs
 ```
 
-### 3. Run Frontend (Separate Terminal)
+Edit `.env` — required variables:
 
 ```bash
-cd Flux_gateway/frontend
+# Required
+DATABASE_URL=postgresql+asyncpg://flux:flux@localhost:5432/flux_gateway
+REDIS_URL=redis://localhost:6379/0
+OPENROUTER_API_KEY=sk-or-v1-...
 
-# Install deps (once)
+# Optional (for OIDC auth)
+OIDC_ISSUER=https://accounts.google.com
+OIDC_CLIENT_ID=...
+OIDC_CLIENT_SECRET=...
+
+# Optional (for Stripe billing)
+STRIPE_SECRET_KEY=sk_test_...
+```
+
+### 2. Start Infrastructure
+
+```bash
+# Start PostgreSQL + Redis
+docker compose up -d postgres redis
+
+# Verify
+docker compose ps
+# postgres    Up (healthy)
+# redis       Up (healthy)
+```
+
+### 3. Start Backend
+
+```bash
+cd backend
+
+# Install dependencies
+pip install -e ".[dev,ml]"
+
+# Run migrations
+alembic upgrade head
+
+# Start API server
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 4. Start Workers (Optional)
+
+```bash
+cd backend
+
+# Start ARQ worker pool for async job processing
+arq src.workers.tasks.WorkerSettings
+```
+
+### 5. Start Frontend
+
+```bash
+cd frontend
+
+# Install dependencies
 npm install
 
 # Start dev server
 npm run dev
-
-# http://localhost:3000
-# Dashboard: http://localhost:3000/dashboard
 ```
 
-### 4. Dev Mode (Backend Outside Docker)
+### 6. Verify
 
 ```bash
-# Terminal 1: Start DB + Redis only
-docker compose up -d postgres redis
+# Backend health
+curl http://localhost:8000/health
+# {"status":"ok"}
 
-# Terminal 2: Run backend locally
-cd Flux_gateway/backend
-cp ../.env.template ../.env    # edit OPENROUTER_API_KEY
-pip install -e ".[dev,ml]"
-alembic upgrade head
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Terminal 3: Run frontend
-cd Flux_gateway/frontend
-npm install && npm run dev
-```
-
-### 5. Verify Everything Works
-
-```bash
-# Health check
-curl http://localhost:8000/health      # {"status":"ok"}
-
-# Create API key (requires OPENROUTER_API_KEY not needed for this)
+# Create API key
 curl -X POST http://localhost:8000/api/v1/api-keys \
   -H "Content-Type: application/json" \
-  -d '{"name":"test"}'
-# Response: {"id":"...","key":"sk-...","name":"test"}
-# Save the sk- key for all future requests
+  -d '{"name":"test-key"}'
+# {"id":"...","key":"sk-...","name":"test-key"}
 
-# Test schema-grounded query
-curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: sk-..." \
-  -d '{"prompt":"What is the meaning of life?"}'
-
-# Frontend: open http://localhost:3000/dashboard
+# Open dashboard
+open http://localhost:3000/dashboard
 ```
 
-### 6. Dev Commands
+---
+
+## Development Commands
+
+### Backend
 
 ```bash
-# === Backend ===
 cd backend
-ruff check src/                   # Lint
-mypy --ignore-missing-imports src/ # Type check
-pytest                             # Run tests
+
+# Linting
+ruff check src/                    # Check
+ruff check src/ --fix              # Auto-fix
+
+# Type checking
+mypy --ignore-missing-imports src/
+
+# Testing
+pytest                             # Run all tests
+pytest -v                          # Verbose output
+pytest --cov=src                   # With coverage
+
+# Database
 alembic upgrade head               # Apply migrations
-alembic revision --autogenerate -m "desc"  # New migration
+alembic downgrade -1               # Rollback one migration
+alembic revision --autogenerate -m "description"  # Create migration
 
-# === Frontend ===
-cd frontend
-npx eslint src/                    # Lint
-npx tsc --noEmit                   # Type check
+# Development server
+uvicorn src.main:app --reload --port 8000
 
-# === Docker ===
-docker compose down                # Stop all
-docker compose down -v             # Stop + wipe DB data
-docker compose logs -f backend     # Follow logs
-docker compose exec postgres psql -U flux -d flux_gateway  # SQL shell
+# Worker
+arq src.workers.tasks.WorkerSettings
 ```
 
-### API Endpoints
+### Frontend
 
-| Method | Path | Description |
-|--------|------|-------------|
+```bash
+cd frontend
+
+# Development
+npm run dev                        # Start dev server (port 3000)
+npm run build                      # Production build
+npm run start                      # Start production server
+
+# Linting & Type checking
+npm run lint                       # ESLint
+npx tsc --noEmit                   # TypeScript check
+
+# Testing (coming soon)
+# npm run test                     # Vitest
+# npm run test:e2e                 # Playwright
+```
+
+### Docker
+
+```bash
+# Start all services
+docker compose up -d
+
+# Start specific services
+docker compose up -d postgres redis
+docker compose up -d backend
+
+# View logs
+docker compose logs -f backend
+docker compose logs -f postgres
+
+# Stop services
+docker compose down                # Stop (preserve data)
+docker compose down -v             # Stop + wipe volumes
+
+# Database shell
+docker compose exec postgres psql -U flux -d flux_gateway
+
+# Redis CLI
+docker compose exec redis redis-cli
+```
+
+---
+
+## Project Structure
+
+```
+Flux_gateway/
+├── docker-compose.yml              # PostgreSQL, Redis, backend services
+├── .env.template                   # Environment variables template
+│
+├── backend/
+│   ├── pyproject.toml              # Python dependencies (FastAPI, LangGraph, ARQ, Stripe)
+│   ├── alembic.ini                 # Database migration config
+│   └── src/
+│       ├── main.py                 # FastAPI app entry, router registration
+│       ├── core/                   # Config, security, OIDC, tenant context, middleware
+│       ├── db/
+│       │   ├── models/             # SQLAlchemy models (10 tables)
+│       │   ├── migrations/         # Alembic migrations (3 versions)
+│       │   ├── session.py          # Async engine + session factory
+│       │   └── tenant_isolation.py # Auto tenant filtering on queries
+│       ├── api/v1/                 # REST API routers (13 endpoints groups)
+│       │   ├── auth.py             # OIDC login/callback
+│       │   ├── api_keys.py         # API key CRUD
+│       │   ├── connections.py      # DB connection CRUD
+│       │   ├── schema_endpoints.py # Schema reflection/cache
+│       │   ├── query.py            # Simple NL query
+│       │   ├── rag.py              # Document upload, search, RAG Q&A
+│       │   ├── agent.py            # Full LangGraph agent pipeline
+│       │   ├── sandbox.py          # Docker code execution
+│       │   ├── events.py           # Event log CRUD
+│       │   ├── webhooks.py         # Webhook config + ingestion
+│       │   ├── behavior_rules.py   # Automation rules CRUD
+│       │   ├── ws.py               # WebSocket endpoint
+│       │   └── usage.py            # Usage tracking/billing
+│       ├── agents/                 # LangGraph 7-node pipeline
+│       │   ├── graph.py            # Workflow definition + run_agent()
+│       │   ├── state.py            # AgentState TypedDict
+│       │   └── nodes/              # classify, research, code, review, heal, execute, format
+│       ├── services/               # Business logic
+│       │   ├── llm.py              # OpenRouter + local fallback
+│       │   ├── rag_ingestion.py    # PDF/MD/TXT parsing, chunking, embedding
+│       │   ├── rag_query.py        # Hybrid search (vector + BM25 + RRF)
+│       │   ├── sandbox.py          # Docker SQL validation
+│       │   ├── schema_cache.py     # Redis schema cache
+│       │   ├── schema_reflection.py # PostgreSQL introspection
+│       │   ├── websocket_manager.py # Per-tenant WS connection pool
+│       │   ├── event_bus.py        # Redis Pub/Sub
+│       │   ├── behavior_rules.py   # Rule evaluation engine
+│       │   ├── webhook_service.py  # HMAC verification + ingestion
+│       │   └── usage_tracker.py    # Token/compute/storage tracking
+│       └── workers/                # ARQ async workers
+│           └── tasks.py            # process_event, run_agent_task
+│
+├── frontend/
+│   ├── package.json                # Next.js 16, React 19, Tailwind v4, shadcn/ui
+│   └── src/
+│       ├── app/                    # Next.js App Router pages
+│       │   ├── dashboard/          # 8 dashboard sections
+│       │   └── api/                # Next.js API proxy
+│       ├── components/
+│       │   ├── ui/                 # 29 shadcn/ui primitives (Radix-based)
+│       │   ├── providers.tsx       # QueryClient, Toaster, ErrorBoundary
+│       │   ├── error-boundary.tsx  # React error boundary
+│       │   ├── sidebar.tsx         # Collapsible navigation
+│       │   └── header.tsx          # Top bar
+│       └── lib/
+│           ├── api.ts              # Typed API client
+│           ├── ws.ts               # WebSocket client (auto-reconnect)
+│           ├── toast.ts            # Sonner toast wrapper
+│           └── utils.ts            # cn() helper
+│
+└── docs/
+    ├── CURRENT_STATE.md            # What's built, what's next
+    ├── MASTER_GUIDE.md             # Full architecture deep-dive
+    ├── architecture/               # System overview, data flows
+    ├── modules/                    # Feature specs (event-gateway, etc.)
+    └── roadmap/                    # Stage 1-3 task breakdowns
+```
+
+---
+
+## API Reference
+
+### Authentication
+
+All endpoints require `X-API-Key: sk-...` header (except `/health` and `/api/v1/auth/*`).
+
+### Core Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | `GET` | `/health` | Health check |
-| `POST` | `/api/v1/auth/login` | OIDC login |
+| `POST` | `/api/v1/auth/login` | OIDC login redirect |
 | `GET` | `/api/v1/auth/callback` | OIDC callback |
+
+### API Keys
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | `POST` | `/api/v1/api-keys` | Create API key |
 | `GET` | `/api/v1/api-keys` | List API keys |
+| `DELETE` | `/api/v1/api-keys/{id}` | Revoke API key |
+
+### Connections
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | `POST` | `/api/v1/connections` | Create DB connection |
 | `GET` | `/api/v1/connections` | List connections |
-| `POST` | `/api/v1/schema/{connection_id}/reflect` | Reflect schema |
-| `GET` | `/api/v1/schema/{connection_id}` | Get cached schema |
-| `POST` | `/api/v1/query` | Schema-grounded NL query |
-| `POST` | `/api/v1/rag/documents` | Upload document |
+| `DELETE` | `/api/v1/connections/{id}` | Delete connection |
+| `POST` | `/api/v1/connections/{id}/test` | Test connection |
+
+### Schema
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/connections/{id}/reflect` | Reflect DB schema |
+| `GET` | `/api/v1/connections/{id}/schema` | Get cached schema |
+| `POST` | `/api/v1/schema/refresh` | Refresh all schemas |
+| `GET` | `/api/v1/schema/test` | Test schema endpoint |
+
+### Query & Agent
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/query` | Simple NL query |
+| `POST` | `/api/v1/agent/query` | Full LangGraph agent pipeline |
+| `POST` | `/api/v1/sandbox/execute` | Execute SQL in Docker sandbox |
+
+### RAG (Retrieval-Augmented Generation)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/rag/documents` | Upload document (PDF/MD/TXT) |
 | `GET` | `/api/v1/rag/documents` | List documents |
-| `POST` | `/api/v1/rag/search` | Hybrid search |
-| `POST` | `/api/v1/rag/ask` | RAG + LLM answer with citations |
-| `POST` | `/api/v1/agent/query` | LangGraph agent query (full pipeline) |
-| `POST` | `/api/v1/sandbox/execute` | Execute code in Docker sandbox |
+| `DELETE` | `/api/v1/rag/documents/{id}` | Delete document |
+| `POST` | `/api/v1/rag/search` | Hybrid search (vector + BM25) |
+| `POST` | `/api/v1/rag/ask` | RAG Q&A with citations |
 
-## Status
+### Event Gateway
 
-| Stage | Week | Status |
-|-------|------|--------|
-| Stage 1: Core | W1-4 | Complete |
-| Stage 2: Product | W5-6 | Complete (RAG + Hybrid Search) |
-| Stage 2: Product | W7 | Complete (LangGraph Agent) |
-| Stage 2: Product | W8 | Complete (Frontend Dashboard) |
-| Stage 3: Scale | W9 | Complete (Docker Sandbox) |
-| Stage 3: Scale | W10-12 | Pending |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/events` | List events (paginated, filterable) |
+| `GET` | `/api/v1/events/{id}` | Get event details |
+| `POST` | `/api/v1/events/{id}/retry` | Retry failed event |
+| `WS` | `/ws/{tenant_id}` | WebSocket event stream |
+
+### Webhooks
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/webhooks` | Create webhook config |
+| `GET` | `/api/v1/webhooks` | List webhook configs |
+| `PATCH` | `/api/v1/webhooks/{id}` | Update webhook config |
+| `DELETE` | `/api/v1/webhooks/{id}` | Delete webhook config |
+| `POST` | `/api/v1/webhooks/ingest/{hook_id}` | Ingest webhook (HMAC verified) |
+
+### Behavior Rules
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/behavior-rules` | Create automation rule |
+| `GET` | `/api/v1/behavior-rules` | List rules |
+| `PATCH` | `/api/v1/behavior-rules/{id}` | Update rule |
+| `DELETE` | `/api/v1/behavior-rules/{id}` | Delete rule |
+
+### Usage & Billing
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/usage/summary` | Current month usage |
+| `GET` | `/api/v1/usage/history` | Usage history (monthly) |
+
+---
+
+## Database Schema
+
+**10 tables across 3 migrations:**
+
+| Table | Purpose |
+|-------|---------|
+| `tenants` | Multi-tenant root |
+| `users` | OIDC users linked to tenants |
+| `api_keys` | SHA-256 hashed API keys |
+| `connections` | Encrypted DB connection strings |
+| `schema_cache` | JSON schema snapshots |
+| `credentials` | Fernet-encrypted service credentials |
+| `documents` | RAG uploaded documents |
+| `chunks` | Text chunks + pgvector(1536) embeddings |
+| `citations` | Query-to-chunk references |
+| `webhook_configs` | Webhook endpoint configurations |
+| `behavior_rules` | Automation trigger rules (JSONB conditions) |
+| `event_log` | Webhook event audit trail |
+| `usage_records` | Monthly token/compute/storage tracking |
+
+---
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | Yes | — | PostgreSQL async connection string |
+| `REDIS_URL` | Yes | — | Redis connection string |
+| `OPENROUTER_API_KEY` | Yes | — | OpenRouter API key for GPT-4o |
+| `FERNET_KEY` | No | auto-generated | Encryption key for credentials |
+| `OIDC_ISSUER` | No | — | OIDC provider URL |
+| `OIDC_CLIENT_ID` | No | — | OIDC client ID |
+| `OIDC_CLIENT_SECRET` | No | — | OIDC client secret |
+| `STRIPE_SECRET_KEY` | No | — | Stripe secret key for billing |
+| `SANDBOX_ENABLED` | No | `true` | Enable Docker sandbox |
+| `SANDBOX_TIMEOUT` | No | `30` | Sandbox execution timeout (seconds) |
+
+---
+
+## Documentation
+
+- **[CURRENT_STATE.md](docs/CURRENT_STATE.md)** — What's built now, what's next
+- **[MASTER_GUIDE.md](docs/MASTER_GUIDE.md)** — Full architecture deep-dive
+- **[docs/architecture/](docs/architecture/)** — System overview, data flows, security model
+- **[docs/modules/](docs/modules/)** — Feature specs (event-gateway, schema-engine, etc.)
+- **[docs/roadmap/](docs/roadmap/)** — Stage 1-3 task breakdowns, future goals
+
+---
 
 ## License
 
 Proprietary. All rights reserved.
+
+---
+
+<div align="center">
+
+**Built with FastAPI · LangGraph · PostgreSQL · Redis · Next.js**
+
+</div>
