@@ -1,3 +1,5 @@
+"""Reviewer node — sandbox validation of generated SQL/code before execution."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -13,10 +15,18 @@ logger = structlog.get_logger(__name__)
 async def reviewer_node(
     state: AgentState, config: dict[str, Any] | None = None
 ) -> dict:
+    """
+    Validate generated code in Docker sandbox. Checks for:
+    - Dangerous ops (DROP, TRUNCATE, ALTER)
+    - SQL injection patterns
+    - Schema mismatches (column doesn't exist)
+    Falls back to regex validation if Docker unavailable.
+    """
     code = state.get("generated_code", "") or ""
     schema_graph = state.get("schema_graph") or {}
     tenant_id = state["tenant_id"]
 
+    # Empty code = nothing to validate, fail fast
     if not code.strip():
         return {
             "review_passed": False,
@@ -26,6 +36,7 @@ async def reviewer_node(
             ],
         }
 
+    # Run sandbox validation — Docker or regex fallback
     result = await sandbox_service.validate_sql(tenant_id, code, schema_graph)
 
     logger.info(

@@ -1,3 +1,6 @@
+// Sidebar navigation — collapsible with icon-only mode, highlights active route
+// Uses pathname matching for active state, persists collapse state in component (not localStorage)
+
 "use client"
 
 import Link from "next/link"
@@ -16,6 +19,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
+// Nav items — order defines sidebar layout, icons from lucide-react
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/connections", label: "Connections", icon: Plug },
@@ -58,6 +62,7 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 space-y-1 p-2">
         {navItems.map((item) => {
+          // Active if exact match OR sub-route (but not root /dashboard matching /dashboard/settings)
           const isActive =
             pathname === item.href ||
             (item.href !== "/dashboard" && pathname.startsWith(item.href))

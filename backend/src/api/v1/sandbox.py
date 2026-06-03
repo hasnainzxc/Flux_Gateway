@@ -1,3 +1,5 @@
+"""Sandbox execution endpoint — validate SQL or run code in Docker isolation."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -34,6 +36,8 @@ async def sandbox_execute(
 ) -> SandboxExecuteResponse:
     await check_rate_limit(tenant_id)
 
+    # If schema provided, validate SQL against it (DDL/injection checks).
+    # Otherwise, execute code in sandboxed Docker container.
     if payload.schema_graph:
         result = await sandbox_service.validate_sql(
             tenant_id, payload.code, payload.schema_graph

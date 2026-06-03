@@ -1,3 +1,5 @@
+"""Event gateway models — webhooks, behavior rules, event logs, usage tracking."""
+
 from __future__ import annotations
 
 import uuid
@@ -11,6 +13,8 @@ from src.db.models import Base
 
 
 class WebhookConfig(Base):
+    """Inbound webhook registration. hook_id is the public URL slug, secret for HMAC verify."""
+
     __tablename__ = "webhook_configs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -29,6 +33,11 @@ class WebhookConfig(Base):
 
 
 class BehaviorRule(Base):
+    """
+    Rule engine config — match conditions against event payload, trigger actions.
+    Priority: lower number = higher priority (evaluated first).
+    """
+
     __tablename__ = "behavior_rules"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -49,6 +58,8 @@ class BehaviorRule(Base):
 
 
 class EventLog(Base):
+    """Immutable event record. Tracks lifecycle: queued -> processing -> completed/failed."""
+
     __tablename__ = "event_log"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -71,6 +82,8 @@ class EventLog(Base):
 
 
 class UsageRecord(Base):
+    """Monthly usage aggregation per tenant. One row per (tenant, period_start)."""
+
     __tablename__ = "usage_records"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

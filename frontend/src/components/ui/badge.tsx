@@ -1,3 +1,5 @@
+// Badge — status indicators with variant styles (default, secondary, success, warning, etc.)
+
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 

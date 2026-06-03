@@ -1,3 +1,5 @@
+"""API key CRUD — generate, list, revoke. Raw key shown only once on create."""
+
 from __future__ import annotations
 
 import secrets
@@ -66,9 +68,10 @@ async def create_api_key(
 ) -> ApiKeyCreateResponse:
     from hashlib import sha256
 
+    # Generate 64-char hex key with sk- prefix (e.g. sk-a1b2c3d4...)
     raw_key = f"sk-{secrets.token_hex(32)}"
-    key_hash = sha256(raw_key.encode()).hexdigest()
-    key_prefix = raw_key[:10]
+    key_hash = sha256(raw_key.encode()).hexdigest()  # store hash, never the raw key
+    key_prefix = raw_key[:10]  # first 10 chars for UI display ("sk-a1b2c3d4")
 
     expires_at = None
     if payload.expires_in_days:
@@ -110,5 +113,6 @@ async def revoke_api_key(
     if api_key is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
 
+    # Soft-delete: mark inactive rather than hard delete — preserves audit trail
     api_key.is_active = False
     await session.commit()

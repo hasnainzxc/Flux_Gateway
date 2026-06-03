@@ -1,3 +1,6 @@
+// Dashboard shell layout — persistent sidebar + header with scrollable content area
+// Wraps all /dashboard/* routes, "use client" needed for sidebar state
+
 "use client"
 
 import { Sidebar } from "@/components/sidebar"

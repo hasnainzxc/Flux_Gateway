@@ -1,3 +1,5 @@
+"""Usage tracking endpoints — current billing period summary + historical monthly trends."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -17,6 +19,7 @@ async def usage_summary(
     tenant_id: str = Depends(authenticate),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    """Current billing period usage — tokens, runs, storage, etc."""
     return await get_usage_summary(session, tenant_id)
 
 
@@ -26,4 +29,5 @@ async def usage_history(
     tenant_id: str = Depends(authenticate),
     session: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
+    """Historical monthly usage for last N months, oldest first."""
     return await get_usage_history(session, tenant_id, months)

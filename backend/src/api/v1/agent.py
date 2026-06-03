@@ -1,3 +1,5 @@
+"""Agent query endpoint — orchestrates LangGraph pipeline (classify -> research/code -> review -> exec)."""
+
 from __future__ import annotations
 
 import json
@@ -76,10 +78,12 @@ async def agent_query(
     start = time.perf_counter()
     query_id = str(uuid.uuid4())
 
+    # Load schema graph if connection specified — used by coder node for SQL generation
     schema_graph = None
     if payload.connection_id:
         schema_graph = await _load_schema_graph(session, payload.connection_id)
 
+    # Build initial state bag — each node reads/writes specific fields
     initial_state: AgentState = {
         "tenant_id": tenant_id,
         "user_query": payload.prompt,
@@ -103,7 +107,9 @@ async def agent_query(
         "node_traces": [],
     }
 
+    # Build + invoke LangGraph state machine — classify -> research/code -> review -> exec -> format
     graph = build_agent_graph()
+    # Pass DB session via config so nodes can query without FastAPI DI
     result_state = await graph.ainvoke(
         initial_state, config={"configurable": {"session": session}}
     )

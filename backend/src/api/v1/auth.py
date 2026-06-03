@@ -1,3 +1,5 @@
+"""OIDC login flow — redirect to provider, handle callback, mint JWT, auto-provision tenant."""
+
 from __future__ import annotations
 
 from urllib.parse import urlencode
@@ -34,6 +36,7 @@ class AuthResponse(BaseModel):
 async def login(
     redirect_uri: str = Query(..., description="Frontend callback URL"),
 ) -> RedirectResponse:
+    """Redirect user to OIDC provider's authorization page."""
     auth_endpoint = await oidc_config.get_authorization_endpoint()
     params = {
         "client_id": settings.oidc_client_id,
@@ -50,36 +53,46 @@ async def callback(
     redirect_uri: str = Query(...),
     session: AsyncSession = Depends(get_db),
 ) -> AuthResponse:
+    """
+    OIDC callback — exchange code for tokens, fetch userinfo, auto-provision tenant+user
+    on first login, mint our own JWT for subsequent API calls.
+    """
     token_response = await exchange_code_for_tokens(code, redirect_uri)
+    # Some providers put ID token in "id_token", others in "access_token"
     id_token = token_response["access_token"]
 
+    # Fetch user profile from OIDC provider — email + sub are guaranteed by spec
     userinfo = await get_userinfo(id_token)
     email = userinfo["email"]
-    oidc_sub = userinfo["sub"]
+    oidc_sub = userinfo["sub"]  # unique subject identifier from provider
     display_name = userinfo.get("name", email)
 
+    # Check if user already exists by OIDC subject — prevents duplicate accounts
     result = await session.execute(select(User).where(User.oidc_sub == oidc_sub))
     user = result.scalar_one_or_none()
 
     if user is None:
+        # JIT provisioning — first login auto-creates tenant + user
+        # TODO: slug collision possible if two users share email prefix
         tenant = Tenant(
             name=display_name,
-            slug=email.split("@")[0],
+            slug=email.split("@")[0],  # derive slug from email local part
         )
         session.add(tenant)
-        await session.flush()
+        await session.flush()  # flush to get tenant.id before creating user
 
         user = User(
             tenant_id=tenant.id,
             email=email,
             oidc_sub=oidc_sub,
             display_name=display_name,
-            role="admin",
+            role="admin",  # first user in tenant is always admin
         )
         session.add(user)
         await session.commit()
         await session.refresh(user)
     else:
+        # Existing user — just commit (no-op, but keeps session clean)
         await session.commit()
 
     jwt_token = create_access_token(

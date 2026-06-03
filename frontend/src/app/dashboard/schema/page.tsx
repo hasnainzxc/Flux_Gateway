@@ -1,3 +1,6 @@
+// Global schema explorer placeholder — currently directs users to per-connection schema view
+// TODO: Aggregate all connection schemas into unified view
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function SchemaPage() {

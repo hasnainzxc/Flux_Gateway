@@ -1,3 +1,5 @@
+"""Usage tracking — aggregate monthly metrics per tenant (tokens, runs, storage)."""
+
 from __future__ import annotations
 
 import uuid
@@ -13,8 +15,10 @@ logger = get_logger(__name__)
 
 
 def _current_period() -> tuple[datetime, datetime]:
+    """Get current billing period boundaries (1st of month -> 1st of next month)."""
     now = datetime.now(UTC)
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Handle December -> January rollover (year increment)
     if now.month == 12:
         end = start.replace(year=now.year + 1, month=1)
     else:
@@ -34,6 +38,10 @@ async def track_usage(
     rag_queries: int = 0,
     storage_bytes: int = 0,
 ) -> None:
+    """
+    Increment usage counters for current billing period.
+    Creates new record if first usage this month, else atomic UPDATE += delta.
+    """
     period_start, period_end = _current_period()
 
     result = await session.execute(
@@ -45,6 +53,7 @@ async def track_usage(
     record = result.scalar_one_or_none()
 
     if record is None:
+        # First usage this period — create new record
         record = UsageRecord(
             id=uuid.uuid4(),
             tenant_id=tenant_id,
@@ -60,6 +69,7 @@ async def track_usage(
         )
         session.add(record)
     else:
+        # Atomic increment — safe under concurrent writes
         await session.execute(
             update(UsageRecord)
             .where(UsageRecord.id == record.id)
@@ -82,6 +92,7 @@ async def get_usage_summary(
     session: AsyncSession,
     tenant_id: str,
 ) -> dict:
+    """Get current billing period usage. Returns zeros if no usage yet."""
     period_start, period_end = _current_period()
 
     result = await session.execute(
@@ -123,6 +134,7 @@ async def get_usage_history(
     tenant_id: str,
     months: int = 6,
 ) -> list[dict]:
+    """Get historical usage for last N months, oldest first."""
     result = await session.execute(
         select(UsageRecord)
         .where(UsageRecord.tenant_id == tenant_id)

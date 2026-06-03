@@ -1,3 +1,5 @@
+"""Direct schema query endpoint — ask questions about DB schema via LLM."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -40,6 +42,7 @@ async def schema_query(
 
     start = time_module.perf_counter()
 
+    # Load schema context if connection specified — truncated to 8k chars to fit LLM window
     schema_context = ""
     if payload.connection_id:
         result = await session.execute(
@@ -52,7 +55,7 @@ async def schema_query(
         if cache:
             schema_context = (
                 "You have access to the following database schema:\n"
-                + cache.schema_graph[:8000]
+                + cache.schema_graph[:8000]  # truncate to ~2k tokens
             )
 
     system_prompt = (
@@ -69,9 +72,11 @@ async def schema_query(
         {"role": "user", "content": payload.prompt},
     ]
 
+    # Call LLM — default model is gpt-4o-mini (cheap, fast enough for schema Q&A)
     answer, tokens_used = await llm_complete(messages)
     elapsed = (time_module.perf_counter() - start) * 1000
 
+    # Audit trail — who asked what, when, from where
     await log_audit_event(
         tenant_id=tenant_id,
         event_type="schema_query",

@@ -1,3 +1,6 @@
+// Agent chat interface — sends NL queries to backend, displays responses with citations and token stats
+// Uses AnimatePresence for smooth message animations, auto-scrolls to bottom on new messages
+
 "use client"
 
 import { useState, useRef, useEffect } from "react"
@@ -16,6 +19,7 @@ interface Message {
   latencyMs?: number
 }
 
+// Color-code citation badges by confidence score — green (high), amber (medium), red (low)
 function getScoreColor(score: number) {
   if (score >= 0.9) return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
   if (score >= 0.7) return "bg-amber-500/20 text-amber-400 border-amber-500/30"
@@ -32,6 +36,7 @@ export default function ChatPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  // Send query to agent — optimistic update adds user msg immediately, agent response appends after fetch
   const handleSend = async () => {
     if (!input.trim() || loading) return
     const query = input
@@ -52,6 +57,7 @@ export default function ChatPage() {
         },
       ])
     } catch {
+      // Show generic error message — no retry, user can just send another query
       setMessages((prev) => [
         ...prev,
         {
@@ -64,6 +70,7 @@ export default function ChatPage() {
     }
   }
 
+  // Enter sends, Shift+Enter adds newline — standard chat UX
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()

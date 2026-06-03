@@ -1,3 +1,5 @@
+"""Webhook CRUD + ingest endpoint. HMAC signature verification, event queueing via arq."""
+
 from __future__ import annotations
 
 import secrets
@@ -63,8 +65,9 @@ async def create_webhook(
     tenant_id: str = Depends(authenticate),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    # hook_id = public URL slug (e.g. /ingest/abc123), secret = HMAC signing key
     hook_id = secrets.token_urlsafe(16)
-    secret = secrets.token_hex(32)
+    secret = secrets.token_hex(32)  # returned once on create, never again
 
     hook = WebhookConfig(
         id=uuid.uuid4(),
@@ -155,15 +158,18 @@ async def ingest_webhook(
     from src.services.webhook_service import ingest_webhook as do_ingest
     from src.services.webhook_service import resolve_webhook_config, verify_signature
 
+    # Look up webhook config by public hook_id — must be active
     config = await resolve_webhook_config(session, hook_id)
     if config is None:
         raise HTTPException(status_code=404, detail="Webhook not found or inactive")
 
+    # Verify HMAC-SHA256 signature — prevents unauthorized event injection
     body = await request.body()
     sig_header = request.headers.get("X-Signature-256")
     if not verify_signature(body, config.secret or "", sig_header):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
+    # Create EventLog record + match behavior rules + publish to Redis pub/sub
     event = await do_ingest(
         session=session,
         tenant_id=str(config.tenant_id),
@@ -173,6 +179,7 @@ async def ingest_webhook(
     )
     await session.commit()
 
+    # Enqueue async processing via arq worker — runs agent pipeline on the event
     from arq import create_pool
     from arq.connections import RedisSettings
 
@@ -180,10 +187,10 @@ async def ingest_webhook(
 
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     await pool.enqueue_job("process_event", str(event.id), str(config.tenant_id))
-    await pool.close()
+    await pool.close()  # close pool handle, not the underlying Redis conn
 
     return {
         "event_id": str(event.id),
         "status": "queued",
-        "matched_rules": event.matched_rules,
+        "matched_rules": event.matched_rules,  # rules matched during ingest
     }

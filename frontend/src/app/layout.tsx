@@ -1,7 +1,10 @@
+// Root layout — wraps all pages with theme provider, global providers (React Query, Toaster, ErrorBoundary)
+// Geist fonts loaded via next/font for optimal performance
+
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { ThemeProvider } from "@/components/theme-provider"
-import { Toaster } from "sonner"
+import { Providers } from "@/components/providers"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -31,20 +34,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      {/* suppressHydrationWarning needed for theme class injection on <html> */}
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
-          {children}
-          <Toaster
-            position="bottom-right"
-            theme="dark"
-            toastOptions={{
-              style: {
-                background: "var(--card)",
-                color: "var(--card-foreground)",
-                border: "1px solid var(--border)",
-              },
-            }}
-          />
+          <Providers>{children}</Providers>
         </ThemeProvider>
       </body>
     </html>

@@ -1,3 +1,5 @@
+// Settings page — theme toggle, link to API keys management, placeholder for model selection
+
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"

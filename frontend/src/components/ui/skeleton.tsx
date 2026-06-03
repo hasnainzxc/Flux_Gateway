@@ -1,3 +1,5 @@
+// Skeleton — pulsing placeholder element for loading states
+
 import { cn } from "@/lib/utils"
 
 function Skeleton({

@@ -1,3 +1,5 @@
+"""Migration 0001: Core tables — tenants, users, api_keys, connections, schema_cache."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -6,7 +8,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0001_initial"
-down_revision: str | None = None
+down_revision: str | None = None  # first migration, no parent
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -80,6 +82,7 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(timezone=True)),
     )
 
+    # Indexes for hot lookup paths — key_hash for API key auth, tenant_id for row-level isolation
     op.create_index("idx_api_keys_key_hash", "api_keys", ["key_hash"])
     op.create_index("idx_connections_tenant", "connections", ["tenant_id"])
     op.create_index("idx_schema_cache_connection", "schema_cache", ["connection_id"])
@@ -87,6 +90,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Drop in reverse FK-dependency order to avoid constraint violations
     op.drop_table("credentials")
     op.drop_table("schema_cache")
     op.drop_table("connections")

@@ -2,9 +2,9 @@
 
 > Full reference: **[MASTER_GUIDE.md](MASTER_GUIDE.md)** — architecture, decision rationale, security model, agent topology, dev→prod evolution, API reference
 >
-> **Date**: 2026-06-03
-> **Phase**: Stage 3 Complete (Weeks 9-12) — Production Ready
-> **Last Commit**: pending — `feat(event-gateway): WebSocket, webhooks, ARQ workers, usage tracking`
+> **Date**: 2026-06-04
+> **Phase**: Stage 3 Complete + UI Foundation Refactor (Phase 0)
+> **Last Commit**: pending — audit, comments, bug fixes, Phase 0 foundation
 
 ---
 
@@ -121,6 +121,41 @@ If failed → Self-Heal node fixes + retries (max 3)
 - Frontend: 4 new pages (events, webhooks, billing/usage, dashboard stats)
 - Updated: `main.py`, `graph.py`, `api.ts`, `ws.ts`, `sidebar.tsx`, `dialog.tsx`
 
+### UI/UX Refactor Phase 0 — Foundation (Today)
+
+**Goal**: Rebuild frontend foundation with proper shadcn components, error handling, typed API client, and comprehensive codebase audit.
+
+**What was built**:
+
+| Component | What it does |
+|-----------|-------------|
+| 23 shadcn/ui primitives | select, tabs, tooltip, dropdown-menu, scroll-area, accordion, toggle, switch, checkbox, popover, separator, label, textarea, avatar, slider, alert-dialog, radio-group, progress, hover-card, navigation-menu, sheet, table, command |
+| Radix Dialog replacement | Replaced custom Dialog with @radix-ui/react-dialog — focus trap, escape, ARIA |
+| ErrorBoundary | React class component with fallback UI, catches render errors |
+| Toast helpers | sonner wrapper — success/error/info/warning/loading/promise |
+| Providers component | QueryClient + Toaster + ErrorBoundary + TooltipProvider wrapper |
+| Full codebase audit | 52 backend + 46 frontend files audited, ~200 comments added |
+| Critical bug fixes | RAG tuple unpack, embedder dim padding, API key expiry enforcement |
+| Frontend fixes | WS URL env var, reconnect guard, non-JSON response handling, form validation, delete confirmations |
+
+**Dependencies added (77 packages)**:
+- `@tanstack/react-query` — data fetching
+- 20 Radix UI primitives
+- `cmdk` — command palette
+- `next-themes` — theme provider
+
+**Bug fixes**:
+- Backend: `rag.py` — `llm_complete` returns `(str, int)` tuple, was assigned to single var. Fixed with proper unpack
+- Backend: `llm.py` — Local fallback embedder produces 384-dim, DB expects 1536. Fixed with zero-padding
+- Backend: `deps.py` — API key `expires_at` not enforced. Fixed with expiry check
+- Frontend: `ws.ts` — Hardcoded `ws://localhost:8000`. Fixed with `NEXT_PUBLIC_WS_URL` env var
+- Frontend: `ws.ts` — Reconnect on clean close. Fixed with `wasClean` guard
+- Frontend: `api.ts` — Crash on non-JSON responses. Fixed with content-type check
+- Frontend: `connections/page.tsx` — NaN port, no validation, no delete confirm. All fixed
+- Frontend: `events/page.tsx` — Tenant fallback to "default". Fixed — requires tenant_id
+
+## Status
+
 | Component | Status |
 |-----------|--------|
 | Project concept & requirements | Done |
@@ -193,17 +228,20 @@ frontend/src/
 │   ├── theme-provider.tsx            # Dark-first with system detection
 │   ├── sidebar.tsx                   # Collapsible nav (8 items incl. Webhooks)
 │   ├── header.tsx                    # Theme toggle + notifications
-│   └── ui/                           # shadcn/ui primitives
-│       ├── button.tsx
-│       ├── card.tsx
-│       ├── input.tsx
-│       ├── badge.tsx
-│       ├── dialog.tsx
-│       └── skeleton.tsx
+│   ├── error-boundary.tsx            # React ErrorBoundary with fallback UI
+│   ├── providers.tsx                 # QueryClient + Toaster + ErrorBoundary + TooltipProvider
+│   └── ui/                           # 29 shadcn/ui primitives (Radix-based)
+│       ├── accordion.tsx, alert-dialog.tsx, avatar.tsx, badge.tsx, button.tsx
+│       ├── card.tsx, checkbox.tsx, command.tsx, dialog.tsx, dropdown-menu.tsx
+│       ├── hover-card.tsx, input.tsx, label.tsx, navigation-menu.tsx
+│       ├── popover.tsx, progress.tsx, radio-group.tsx, scroll-area.tsx
+│       ├── select.tsx, separator.tsx, sheet.tsx, skeleton.tsx, slider.tsx
+│       ├── switch.tsx, table.tsx, tabs.tsx, textarea.tsx, toggle.tsx, tooltip.tsx
 └── lib/
     ├── utils.ts                      # cn() helper
     ├── api.ts                        # ApiClient (connections, schema, query, rag, keys, events, webhooks, rules, usage)
-    └── ws.ts                         # WebSocket client (auto-reconnect, tenant-scoped)
+    ├── toast.ts                      # sonner wrapper (success/error/info/warning/loading/promise)
+    └── ws.ts                         # WebSocket client (env-based URL, wasClean guard, tenant-scoped)
 
 docs/
 ├── PROJECT_PLAN.md
@@ -228,17 +266,22 @@ docs/
 frontend/package.json:
   next 16.2.6, react 19.2.4, react-dom 19.2.4
   react-hook-form, zod, @hookform/resolvers
-  motion (Framer Motion), sonner
+  motion (Framer Motion), sonner, next-themes
   lucide-react, react-dropzone
+  @tanstack/react-query, cmdk
   class-variance-authority, clsx, tailwind-merge
   tailwindcss 4, @tailwindcss/postcss
+  @radix-ui/* (20 packages: dialog, select, tabs, tooltip, dropdown-menu,
+    scroll-area, accordion, toggle, switch, checkbox, popover, separator,
+    label, avatar, slider, alert-dialog, radio-group, progress, hover-card,
+    navigation-menu)
 ```
 
 ## Git Branches
 
 ```
 main (1ad61e9)           ← Stage 1 + Stage 2 W5-6
-  ← develop (pending)    ← + Stage 2 W7-8 + Stage 3 W9-12 (Event Gateway + Usage)
+  ← develop              ← + Stage 2 W7-8 + Stage 3 W9-12 + Phase 0 UI Foundation
 ```
 
 ## Environment
@@ -250,13 +293,15 @@ Docker: postgres (pgvector), redis
 Node: 22.22.0 · npm: 10.9.4
 ```
 
-## Next Actions (Post-Stage 3)
+## Next Actions
 
-1. Security audit — penetration testing, dependency scan, secrets check
-2. Stripe integration — wire usage records to Stripe billing API
-3. Admin dashboard — tenant management, system health monitoring
-4. Documentation — API docs (OpenAPI/Swagger), user guides, deployment guide
-5. Production deployment — Docker Compose prod, CI/CD pipeline, monitoring
+1. **Phase 1: Core UX** — Dashboard rewrite (animated stats, recharts), file upload system (drag-drop, Excel/CSV), loading skeletons, mobile nav, data tables, form components
+2. **Phase 2: Animations** — Page transitions, stagger lists, micro-interactions, chat streaming, events real-time animations
+3. Stripe integration — wire usage records to Stripe billing API
+4. Admin dashboard — tenant management, system health monitoring
+5. Documentation — API docs (OpenAPI/Swagger), Storybook, user guides
+6. Testing — Vitest + Playwright + 80%+ coverage
+7. Production deployment — Docker Compose prod, CI/CD pipeline, monitoring
 
 ## Blockers
 

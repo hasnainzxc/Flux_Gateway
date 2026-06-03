@@ -1,3 +1,5 @@
+"""Behavior rules CRUD — configure event matching conditions + actions."""
+
 from __future__ import annotations
 
 import uuid

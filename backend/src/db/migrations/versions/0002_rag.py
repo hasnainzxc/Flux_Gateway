@@ -1,3 +1,5 @@
+"""Migration 0002: RAG tables — documents, chunks (pgvector), citations."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -39,6 +41,7 @@ def upgrade() -> None:
         sa.Column("tenant_id", sa.UUID(), sa.ForeignKey("tenants.id"), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
+        # 1536-dim vector from text-embedding-3-small — matches OpenAI's output dim
         sa.Column("embedding", Vector(1536), nullable=True),
         sa.Column("token_count", sa.Integer(), default=0),
         sa.Column("metadata", sa.JSON(), nullable=True),

@@ -1,3 +1,6 @@
+// Events feed — real-time webhook events and agent execution status via WebSocket
+// Supports filtering by status, live updates via WS, auto-scroll on new events
+
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -22,6 +25,7 @@ interface Event {
   completed_at: string | null
 }
 
+// Map event status to icon + color for visual indicators in feed
 const statusConfig: Record<string, { icon: typeof Activity; color: string }> = {
   queued: { icon: Clock, color: "text-yellow-500" },
   processing: { icon: RefreshCw, color: "text-blue-500" },
@@ -54,11 +58,15 @@ export default function EventsPage() {
     loadEvents()
   }, [loadEvents])
 
+  // WS setup — connect on mount, subscribe to event/agent_status updates, cleanup on unmount
+  // Tenant ID from localStorage scopes the WS connection to current user/org
   useEffect(() => {
-    const tenantId = localStorage.getItem("flux_tenant_id") || "default"
+    const tenantId = localStorage.getItem("flux_tenant_id")
+    if (!tenantId) return
     wsClient.connect(tenantId)
 
     const unsub1 = wsClient.on("connected", () => setConnected(true))
+    // Live event updates — patch existing event in list or ignore if not found
     const unsub2 = wsClient.on("event", (msg: unknown) => {
       const data = msg as { data: { event_id: string; status: string; result?: Record<string, unknown>; completed_at?: string } }
       setEvents((prev) => {
@@ -71,6 +79,7 @@ export default function EventsPage() {
         return prev
       })
     })
+    // Agent status updates — match by agent_run_id to update event status
     const unsub3 = wsClient.on("agent_status", (msg: unknown) => {
       const data = msg as { data: { run_id: string; status: string } }
       setEvents((prev) =>
