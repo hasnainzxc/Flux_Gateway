@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import require_tenant
+from src.api.deps import authenticate, require_tenant
 from src.core.security_middleware import check_rate_limit, log_audit_event
 from src.db.models import SchemaCache
 from src.db.session import get_db
@@ -34,6 +34,7 @@ async def schema_query(
     payload: QueryRequest,
     request: Request,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> QueryResponse:
     import time as time_module

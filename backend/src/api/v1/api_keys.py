@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import require_tenant
+from src.api.deps import authenticate, require_tenant
 from src.db.models import ApiKey
 from src.db.session import get_db
 
@@ -40,6 +40,7 @@ class ApiKeyCreateResponse(ApiKeyResponse):
 @router.get("/", response_model=list[ApiKeyResponse])
 async def list_api_keys(
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     _tenant: str = Depends(require_tenant),
 ) -> list[ApiKeyResponse]:
     result = await session.execute(
@@ -64,6 +65,7 @@ async def list_api_keys(
 async def create_api_key(
     payload: ApiKeyCreate,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> ApiKeyCreateResponse:
     from hashlib import sha256
@@ -71,7 +73,7 @@ async def create_api_key(
     # Generate 64-char hex key with sk- prefix (e.g. sk-a1b2c3d4...)
     raw_key = f"sk-{secrets.token_hex(32)}"
     key_hash = sha256(raw_key.encode()).hexdigest()  # store hash, never the raw key
-    key_prefix = raw_key[:10]  # first 10 chars for UI display ("sk-a1b2c3d4")
+    key_prefix = raw_key[:8]  # first 10 chars for UI display ("sk-a1b2c3d4")
 
     expires_at = None
     if payload.expires_in_days:
@@ -104,6 +106,7 @@ async def create_api_key(
 async def revoke_api_key(
     key_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     _tenant: str = Depends(require_tenant),
 ) -> None:
     result = await session.execute(
