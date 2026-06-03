@@ -1,4 +1,5 @@
-// Event detail stub — returns null until event detail/timeline view is implemented
+import { redirect } from "next/navigation"
+
 export default function EventDetailPage() {
-  return null
+  redirect("/dashboard/events")
 }

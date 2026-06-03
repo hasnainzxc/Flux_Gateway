@@ -17,7 +17,12 @@ import {
   ChevronLeft,
   Webhook,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+
+function getInitialCollapsed(): boolean {
+  if (typeof window === "undefined") return false
+  return localStorage.getItem("flux_sidebar_collapsed") === "true"
+}
 
 // Nav items — order defines sidebar layout, icons from lucide-react
 const navItems = [
@@ -33,7 +38,11 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(getInitialCollapsed)
+
+  useEffect(() => {
+    localStorage.setItem("flux_sidebar_collapsed", String(collapsed))
+  }, [collapsed])
 
   return (
     <aside

@@ -1,4 +1,5 @@
-// Document detail stub — returns null until doc preview/chunk viewer is implemented
+import { redirect } from "next/navigation"
+
 export default function DocDetailPage() {
-  return null
+  redirect("/dashboard/docs")
 }
