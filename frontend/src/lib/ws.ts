@@ -5,8 +5,10 @@ class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private handlers: Map<string, Set<EventHandler>> = new Map()
   private url: string = ""
+  private _tenantId: string = ""
 
   connect(tenantId: string) {
+    this._tenantId = tenantId
     const apiKey =
       typeof window !== "undefined"
         ? localStorage.getItem("flux_api_key") || ""
@@ -33,7 +35,7 @@ class WsClient {
     if (this.reconnectTimer) return
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      if (this.url) this.connect(this.url)
+      if (this._tenantId) this.connect(this._tenantId)
     }, 3000)
   }
 

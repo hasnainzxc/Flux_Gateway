@@ -12,6 +12,7 @@ import {
   Activity,
   Settings,
   ChevronLeft,
+  Webhook,
 } from "lucide-react"
 import { useState } from "react"
 
@@ -22,6 +23,7 @@ const navItems = [
   { href: "/dashboard/chat", label: "Chat", icon: MessageSquare },
   { href: "/dashboard/docs", label: "Documents", icon: FileText },
   { href: "/dashboard/events", label: "Events", icon: Activity },
+  { href: "/dashboard/events/webhooks", label: "Webhooks", icon: Webhook },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ]
 

@@ -46,4 +46,20 @@ const DialogDescription = ({
   <p className={cn("text-sm text-muted-foreground", className)} {...props} />
 )
 
-export { Dialog, DialogHeader, DialogTitle, DialogDescription }
+const DialogContent = ({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("", className)} {...props} />
+)
+
+const DialogTrigger = ({
+  asChild,
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean }) => {
+  if (asChild) return <>{children}</>
+  return <button {...props}>{children}</button>
+}
+
+export { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogContent, DialogTrigger }

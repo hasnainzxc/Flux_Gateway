@@ -92,70 +92,127 @@ __start__ → classify_intent (gpt-4o-mini)
 └── frontend/                       # (Week 8 — Next.js 16 dashboard)
 ```
 
-## Getting Started
+## Documentation
 
-### Prerequisites
-- Python 3.12+, Node 22+, Docker (Docker Compose v2+)
+- **[MASTER_GUIDE.md](docs/MASTER_GUIDE.md)** — Full architecture, decision rationale, security model, agent topology, dev→prod evolution, API reference
+- **[PROJECT_PLAN.md](PROJECT_PLAN.md)** — Original 12-week implementation plan
+- **[docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)** — What's built now, what's next
+- **[docs/architecture/](docs/architecture/)** — System overview, agent topology, security model, data flow
+- **[docs/modules/](docs/modules/)** — Schema engine, RAG engine, sandbox, event gateway, SDK specs
+- **[docs/roadmap/](docs/roadmap/)** — Stage 1/2/3 task lists, future goals
 
-### Quick Start (Backend)
+## How to Run Everything
+
+### 1. Prerequisites
 
 ```bash
-# Clone & enter
+Python 3.12+    # python --version
+Node 22+        # node --version
+Docker v24+     # docker --version (with Compose v2)
+```
+
+### 2. Quick Start (All-In-One Docker)
+
+```bash
 cd Flux_gateway
 
-# Copy env template
+# Copy env if missing
 cp .env.template .env
 
-# Start PostgreSQL 16 + pgvector + Redis
-docker compose up -d postgres redis
+# Edit .env — set at minimum:
+#   OPENROUTER_API_KEY=sk-or-v1-...
+#   OIDC_ISSUER=https://accounts.google.com  (or skip for API-key-only)
 
-# Wait for health checks
-docker compose ps
-
-# Install Python deps
-cd backend
-pip install -e ".[dev]"
-
-# Run DB migrations
-alembic upgrade head
-
-# Start FastAPI server
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Running Everything with Docker
-
-```bash
-# Start all services (PG, Redis, FastAPI)
+# Start everything: Postgres + pgvector + Redis + FastAPI backend
 docker compose up -d
 
-# API available at http://localhost:8000
-# Swagger docs at http://localhost:8000/docs
+# Check health
+docker compose ps          # all should be "healthy" / "Up"
+docker compose logs backend  # verify no startup errors
+
+# Apply DB migrations
+docker compose exec backend alembic upgrade head
+
+# API: http://localhost:8000
+# Swagger: http://localhost:8000/docs
 ```
 
-### Frontend (Stage 2 Week 8)
+### 3. Run Frontend (Separate Terminal)
 
 ```bash
-cd frontend
+cd Flux_gateway/frontend
+
+# Install deps (once)
 npm install
-npm run dev    # http://localhost:3000
+
+# Start dev server
+npm run dev
+
+# http://localhost:3000
+# Dashboard: http://localhost:3000/dashboard
 ```
 
-### Commands Quick Reference
+### 4. Dev Mode (Backend Outside Docker)
 
 ```bash
-# Backend lint & typecheck
-cd backend
-ruff check src/           # Lint
-mypy --ignore-missing-imports src/   # Type check
-pytest                    # Run tests
-alembic upgrade head      # Apply migrations
-alembic revision --autogenerate -m "desc"  # Create migration
+# Terminal 1: Start DB + Redis only
+docker compose up -d postgres redis
 
-# Frontend lint & typecheck
+# Terminal 2: Run backend locally
+cd Flux_gateway/backend
+cp ../.env.template ../.env    # edit OPENROUTER_API_KEY
+pip install -e ".[dev,ml]"
+alembic upgrade head
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Terminal 3: Run frontend
+cd Flux_gateway/frontend
+npm install && npm run dev
+```
+
+### 5. Verify Everything Works
+
+```bash
+# Health check
+curl http://localhost:8000/health      # {"status":"ok"}
+
+# Create API key (requires OPENROUTER_API_KEY not needed for this)
+curl -X POST http://localhost:8000/api/v1/api-keys \
+  -H "Content-Type: application/json" \
+  -d '{"name":"test"}'
+# Response: {"id":"...","key":"sk-...","name":"test"}
+# Save the sk- key for all future requests
+
+# Test schema-grounded query
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-..." \
+  -d '{"prompt":"What is the meaning of life?"}'
+
+# Frontend: open http://localhost:3000/dashboard
+```
+
+### 6. Dev Commands
+
+```bash
+# === Backend ===
+cd backend
+ruff check src/                   # Lint
+mypy --ignore-missing-imports src/ # Type check
+pytest                             # Run tests
+alembic upgrade head               # Apply migrations
+alembic revision --autogenerate -m "desc"  # New migration
+
+# === Frontend ===
 cd frontend
-npx eslint src/
-npx tsc --noEmit
+npx eslint src/                    # Lint
+npx tsc --noEmit                   # Type check
+
+# === Docker ===
+docker compose down                # Stop all
+docker compose down -v             # Stop + wipe DB data
+docker compose logs -f backend     # Follow logs
+docker compose exec postgres psql -U flux -d flux_gateway  # SQL shell
 ```
 
 ### API Endpoints
