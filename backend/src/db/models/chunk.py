@@ -1,3 +1,5 @@
+"""RAG chunk model — a slice of a document with its embedding vector (pgvector)."""
+
 from __future__ import annotations
 
 import uuid
@@ -12,6 +14,8 @@ from src.db.models import Base
 
 
 class Chunk(Base):
+    """Single chunk from a document. 1536-dim embedding for vector similarity search."""
+
     __tablename__ = "chunks"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

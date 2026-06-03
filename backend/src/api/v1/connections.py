@@ -1,3 +1,5 @@
+"""Connection CRUD — manage external DB connections. Passwords encrypted at rest."""
+
 from __future__ import annotations
 
 import uuid
@@ -64,10 +66,12 @@ async def create_connection(
     session: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(require_tenant),
 ) -> ConnectionResponse:
+    # Build DSN from individual fields — password embedded in URL
     conn_string = (
         f"postgresql://{payload.username}:{payload.password}"
         f"@{payload.host}:{payload.port}/{payload.database}"
     )
+    # Fernet-encrypt the full connection string before persisting
     encrypted = encrypt_value(conn_string)
 
     connection = Connection(

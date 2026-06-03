@@ -1,3 +1,5 @@
+"""Document model — uploaded file metadata. Chunks are child records."""
+
 from __future__ import annotations
 
 import uuid
@@ -11,6 +13,8 @@ from src.db.models import Base
 
 
 class Document(Base):
+    """Uploaded document (PDF, MD, TXT, HTML). Status tracks ingestion pipeline stage."""
+
     __tablename__ = "documents"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

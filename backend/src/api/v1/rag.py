@@ -1,3 +1,5 @@
+"""RAG endpoints — upload docs, search chunks, ask questions with citations."""
+
 from __future__ import annotations
 
 import uuid
@@ -40,18 +42,21 @@ async def upload_document(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename required")
 
+    # Extract extension, whitelist supported types (pdf/md/txt/html)
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
     file_type_map = {"pdf": "pdf", "md": "md", "txt": "txt", "html": "html"}
     file_type = file_type_map.get(ext)
     if file_type is None:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: .{ext}")
 
+    # Read entire file into memory — 50MB cap prevents OOM on large uploads
     content = await file.read()
     max_size = 50 * 1024 * 1024
     if len(content) > max_size:
         raise HTTPException(status_code=400, detail="File too large (max 50MB)")
 
     try:
+        # Full pipeline: parse -> chunk -> embed -> persist chunks + document record
         doc = await rag_ingestion.process_document(
             session=session,
             tenant_id=uuid.UUID(tenant_id),
@@ -60,6 +65,7 @@ async def upload_document(
             file_type=file_type,
         )
         await session.commit()
+        # Invalidate BM25 index so next search rebuilds with new chunks
         rag_query._invalidate_bm25_index(uuid.UUID(tenant_id))
         return DocumentResponse(
             id=str(doc.id),
@@ -185,6 +191,7 @@ async def ask_question(
 ) -> AskResponse:
     from src.services.llm import llm_complete
 
+    # Hybrid search = vector (semantic) + BM25 (keyword), fused via RRF
     results = await rag_query.hybrid_search(
         session=session, tenant_id=uuid.UUID(tenant_id), query=body.query, top_k=body.top_k
     )
@@ -196,6 +203,7 @@ async def ask_question(
             tokens_used=0,
         )
 
+    # Build numbered context blocks [1], [2], ... for LLM to reference
     context, citations = await rag_query.build_context_from_results(results)
 
     messages = [
@@ -213,12 +221,13 @@ async def ask_question(
         },
     ]
 
-    answer = await llm_complete(messages)
+    # llm_complete returns (text, token_count) — unpack both
+    answer, output_tokens = await llm_complete(messages)
 
     return AskResponse(
         answer=answer,
         citations=[CitationInfo(**c) for c in citations],
-        tokens_used=sum(r["token_count"] for r in results) + len(answer) // 4,
+        tokens_used=sum(r["token_count"] for r in results) + output_tokens,
     )
 
 

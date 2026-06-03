@@ -1,3 +1,5 @@
+"""Agent graph nodes — async functions taking AgentState, returning partial state updates."""
+
 from src.agents.nodes.classify_intent import classify_intent_node
 from src.agents.nodes.coder import coder_node
 from src.agents.nodes.format_response import format_response_node

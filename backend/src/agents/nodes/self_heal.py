@@ -1,3 +1,5 @@
+"""Self-heal node — retry loop for failed SQL generation. LLM fixes errors from reviewer."""
+
 from __future__ import annotations
 
 import structlog
@@ -11,11 +13,17 @@ logger = structlog.get_logger(__name__)
 async def self_heal_node(
     state: AgentState, config: dict | None = None
 ) -> dict:
+    """
+    Attempt to fix code that failed sandbox review.
+    Increments retry_count, asks LLM to correct based on error messages.
+    Returns to coder_node for re-review, or gives up after max_retries.
+    """
     code = state.get("generated_code", "") or ""
     errors = state.get("review_errors", [])
     retry_count = state.get("retry_count", 0) + 1
     max_retries = state.get("max_retries", 3)
 
+    # Bail out if we've exhausted retry budget
     if retry_count > max_retries:
         logger.warning("self_heal_max_retries", retries=retry_count)
         return {
@@ -37,6 +45,7 @@ async def self_heal_node(
             ],
         }
 
+    # Format errors as bullet list for LLM context
     error_text = "\n".join(f"- {e}" for e in errors)
 
     messages = [
@@ -58,16 +67,18 @@ async def self_heal_node(
         },
     ]
 
+    # Use gpt-4o (not mini) for self-heal — needs to understand complex SQL errors
     fixed_code, tokens = await llm_complete(messages, model="openai/gpt-4o", max_tokens=2000)
     fixed_code = fixed_code.strip()
 
     logger.info("self_heal_applied", retry=retry_count, new_len=len(fixed_code))
 
+    # Reset review state — coder_node will re-submit to reviewer
     return {
         "generated_code": fixed_code,
         "retry_count": retry_count,
-        "review_passed": False,
-        "review_errors": [],
+        "review_passed": False,  # needs re-review
+        "review_errors": [],  # cleared — reviewer will repopulate
         "tokens_used": state.get("tokens_used", 0) + tokens,
         "node_traces": [
             {
