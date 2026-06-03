@@ -13,11 +13,16 @@ from structlog import get_logger
 from src.api.v1.agent import router as agent_router
 from src.api.v1.api_keys import router as api_keys_router
 from src.api.v1.auth import router as auth_router
+from src.api.v1.behavior_rules import router as behavior_rules_router
 from src.api.v1.connections import router as connections_router
+from src.api.v1.events import router as events_router
 from src.api.v1.query import router as query_router
 from src.api.v1.rag import router as rag_router
 from src.api.v1.sandbox import router as sandbox_router
 from src.api.v1.schema_endpoints import router as schema_router
+from src.api.v1.usage import router as usage_router
+from src.api.v1.webhooks import router as webhooks_router
+from src.api.v1.ws import router as ws_router
 from src.core.config import settings
 
 logger = get_logger(__name__)
@@ -37,7 +42,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("flux gateway starting", environment=settings.environment)
+    from src.core.redis_client import get_redis
+    await get_redis()
     yield
+    from src.core.redis_client import close_redis
+    await close_redis()
     logger.info("flux gateway shutting down")
 
 
@@ -65,6 +74,11 @@ app.include_router(query_router, prefix="/api/v1")
 app.include_router(rag_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(sandbox_router, prefix="/api/v1")
+app.include_router(events_router, prefix="/api/v1")
+app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(behavior_rules_router, prefix="/api/v1")
+app.include_router(usage_router, prefix="/api/v1")
+app.include_router(ws_router)
 
 
 @app.get("/health")
