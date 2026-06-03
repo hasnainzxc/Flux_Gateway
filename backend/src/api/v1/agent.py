@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.graph import build_agent_graph
 from src.agents.state import AgentState
-from src.api.deps import require_tenant
+from src.api.deps import authenticate, require_tenant
 from src.core.security_middleware import check_rate_limit, log_audit_event
 from src.db.models import SchemaCache
 from src.db.session import get_db
@@ -71,6 +71,7 @@ async def agent_query(
     payload: AgentQueryRequest,
     request: Request,
     session: AsyncSession = Depends(get_db),
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> AgentQueryResponse:
     await check_rate_limit(tenant_id)
@@ -145,6 +146,7 @@ async def agent_query(
 @router.get("/queries/{query_id}")
 async def get_agent_query(
     query_id: str,
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> dict:
     return {
@@ -156,6 +158,7 @@ async def get_agent_query(
 
 @router.get("/queries")
 async def list_agent_queries(
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> dict:
     return {

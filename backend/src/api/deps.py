@@ -34,20 +34,25 @@ async def authenticate(
     credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),  # noqa: B008
 ) -> str:
     """
-    Unified auth entrypoint. Routes by token prefix:
+    Unified auth entrypoint. Checks Authorization header first, then X-API-Key header.
+    Routes by token prefix:
     - sk-* -> API key lookup (SHA-256 hash match)
     - anything else -> JWT decode
     Sets current_tenant_id context var on success.
     """
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization header",
-        )
+    token: str | None = None
 
-    token = credentials.credentials
+    if credentials is not None:
+        token = credentials.credentials
 
-    # Route by token prefix: sk-* = API key, anything else = JWT bearer
+    if token is None:
+        token = request.headers.get("X-API-Key")
+        if token is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing authorization header or X-API-Key header",
+            )
+
     if token.startswith("sk-"):
         return await _auth_api_key(token, session, request)
     else:

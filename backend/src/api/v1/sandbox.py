@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from src.api.deps import require_tenant
+from src.api.deps import authenticate, require_tenant
 from src.core.security_middleware import check_rate_limit
 from src.services.sandbox import sandbox_service
 
@@ -32,6 +32,7 @@ class SandboxExecuteResponse(BaseModel):
 async def sandbox_execute(
     payload: SandboxExecuteRequest,
     request: Request,
+    _auth: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> SandboxExecuteResponse:
     await check_rate_limit(tenant_id)

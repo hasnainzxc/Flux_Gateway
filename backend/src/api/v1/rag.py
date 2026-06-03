@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import require_tenant
+from src.api.deps import authenticate, require_tenant
 from src.db.session import get_db
 from src.services import rag_ingestion, rag_query
 
@@ -36,6 +36,7 @@ class DocumentListResponse(BaseModel):
 @router.post("/documents", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
     session: AsyncSession = Depends(get_db),
 ) -> DocumentResponse:
@@ -84,6 +85,7 @@ async def upload_document(
 
 @router.get("/documents", response_model=DocumentListResponse)
 async def list_documents(
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
     session: AsyncSession = Depends(get_db),
     limit: int = 50,
@@ -113,6 +115,7 @@ async def list_documents(
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: str,
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
     session: AsyncSession = Depends(get_db),
 ) -> None:
@@ -148,6 +151,7 @@ class SearchRequest(BaseModel):
 @router.post("/search", response_model=SearchResponse)
 async def search_documents(
     body: SearchRequest,
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
     session: AsyncSession = Depends(get_db),
 ) -> SearchResponse:
@@ -186,6 +190,7 @@ class AskRequest(BaseModel):
 @router.post("/ask", response_model=AskResponse)
 async def ask_question(
     body: AskRequest,
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
     session: AsyncSession = Depends(get_db),
 ) -> AskResponse:
@@ -243,6 +248,7 @@ class CitationDetail(BaseModel):
 @router.get("/citations/{chunk_id}", response_model=CitationDetail)
 async def get_citation_detail(
     chunk_id: str,
+    _tenant: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
     session: AsyncSession = Depends(get_db),
 ) -> CitationDetail:

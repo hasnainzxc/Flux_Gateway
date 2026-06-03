@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import require_tenant
+from src.api.deps import authenticate, require_tenant
 from src.db.models import Connection, SchemaCache
 from src.db.session import get_db
 from src.services.schema_cache import cache_schema, get_cached_schema, invalidate_schema_cache
@@ -24,6 +24,7 @@ async def reflect_schema(
     connection_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> dict[str, Any]:
     result = await session.execute(
@@ -62,6 +63,7 @@ async def reflect_schema(
 async def get_schema(
     connection_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> dict[str, Any]:
     # Try Redis first (fast path), fall back to Postgres
@@ -94,6 +96,7 @@ async def refresh_schema(
     connection_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> dict[str, str]:
     await invalidate_schema_cache(tenant_id, str(connection_id))
@@ -119,6 +122,7 @@ async def refresh_schema(
 async def test_connection_endpoint(
     connection_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     _tenant: str = Depends(require_tenant),
 ) -> dict[str, bool]:
     result = await session.execute(

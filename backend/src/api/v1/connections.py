@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import require_tenant
+from src.api.deps import authenticate, require_tenant
 from src.core.security import encrypt_value
 from src.db.models import Connection
 from src.db.session import get_db
@@ -42,6 +42,7 @@ class ConnectionResponse(BaseModel):
 @router.get("/", response_model=list[ConnectionResponse])
 async def list_connections(
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     _tenant: str = Depends(require_tenant),
 ) -> list[ConnectionResponse]:
     result = await session.execute(select(Connection).order_by(Connection.created_at.desc()))
@@ -64,6 +65,7 @@ async def list_connections(
 async def create_connection(
     payload: ConnectionCreate,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     tenant_id: str = Depends(require_tenant),
 ) -> ConnectionResponse:
     # Build DSN from individual fields — password embedded in URL
@@ -99,6 +101,7 @@ async def create_connection(
 async def get_connection(
     connection_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     _tenant: str = Depends(require_tenant),
 ) -> ConnectionResponse:
     result = await session.execute(
@@ -127,6 +130,7 @@ async def get_connection(
 async def delete_connection(
     connection_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    _auth: str = Depends(authenticate),
     _tenant: str = Depends(require_tenant),
 ) -> None:
     result = await session.execute(
