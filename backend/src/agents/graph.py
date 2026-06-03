@@ -85,3 +85,70 @@ def build_agent_graph() -> StateGraph:
     workflow.add_edge("format_response_node", END)
 
     return workflow.compile()
+
+
+async def run_agent(
+    session: object,
+    tenant_id: str,
+    user_query: str,
+    connection_id: str | None = None,
+    user_role: str = "analyst",
+    max_retries: int = 3,
+) -> dict:
+    import contextlib
+    import json as _json
+
+    from sqlalchemy import select as _select
+
+    from src.db.models import SchemaCache
+
+    schema_graph = None
+    if connection_id:
+        result = await session.execute(
+            _select(SchemaCache)
+            .where(SchemaCache.connection_id == connection_id)
+            .order_by(SchemaCache.created_at.desc())
+            .limit(1)
+        )
+        cache = result.scalar_one_or_none()
+        if cache:
+            with contextlib.suppress(ValueError, TypeError):
+                schema_graph = _json.loads(cache.schema_graph)
+
+    initial_state: AgentState = {
+        "tenant_id": tenant_id,
+        "user_query": user_query,
+        "user_role": user_role,
+        "connection_id": connection_id,
+        "intent": "unknown",
+        "schema_graph": schema_graph,
+        "retrieved_chunks": [],
+        "citations": [],
+        "generated_code": None,
+        "target_system": None,
+        "review_passed": None,
+        "review_errors": [],
+        "retry_count": 0,
+        "max_retries": max_retries,
+        "final_response": None,
+        "execution_result": None,
+        "error": None,
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "node_traces": [],
+    }
+
+    graph = build_agent_graph()
+    result_state = await graph.ainvoke(
+        initial_state, config={"configurable": {"session": session}}
+    )
+
+    return {
+        "answer": result_state.get("final_response", ""),
+        "intent": result_state.get("intent", "unknown"),
+        "citations": result_state.get("citations", []),
+        "execution_result": result_state.get("execution_result"),
+        "tokens_input": result_state.get("tokens_used", 0),
+        "tokens_output": result_state.get("tokens_used", 0),
+        "node_traces": result_state.get("node_traces", []),
+    }

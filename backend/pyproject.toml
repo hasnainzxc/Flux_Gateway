@@ -25,6 +25,8 @@ dependencies = [
     "pymupdf>=1.24.0",
     "tiktoken>=0.7.0",
     "docker>=7.0.0",
+    "arq>=0.26.0",
+    "stripe>=10.0.0",
 ]
 
 [project.optional-dependencies]

@@ -122,3 +122,7 @@ class Credential(Base):
 from src.db.models.chunk import Chunk as Chunk  # noqa: E402
 from src.db.models.citation import Citation as Citation  # noqa: E402
 from src.db.models.document import Document as Document  # noqa: E402
+from src.db.models.event import BehaviorRule as BehaviorRule  # noqa: E402
+from src.db.models.event import EventLog as EventLog  # noqa: E402
+from src.db.models.event import UsageRecord as UsageRecord  # noqa: E402
+from src.db.models.event import WebhookConfig as WebhookConfig  # noqa: E402
