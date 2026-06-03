@@ -1,4 +1,5 @@
-// Conversation detail stub — returns null until chat history feature is implemented
+import { redirect } from "next/navigation"
+
 export default function ConversationPage() {
-  return null
+  redirect("/dashboard/chat")
 }

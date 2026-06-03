@@ -95,13 +95,16 @@ export const api = {
     }>("/api/v1/agent/query", {
       method: "POST",
       body: JSON.stringify({
-        user_query: prompt,
+        prompt: prompt,
         ...options,
       }),
     }),
 
   // === RAG Documents ===
-  getDocuments: () => request<unknown[]>("/api/v1/rag/documents"),
+  getDocuments: async () => {
+    const data = await request<{ documents: unknown[]; total: number }>("/api/v1/rag/documents")
+    return data.documents
+  },
   // Upload uses FormData (multipart) instead of JSON — bypasses request() wrapper
   uploadDocument: async (file: File) => {
     const apiKey = getApiKey()
