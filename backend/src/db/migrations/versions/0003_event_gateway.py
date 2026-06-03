@@ -1,3 +1,5 @@
+"""Migration 0003: Event gateway tables — webhooks, behavior rules, event log, usage records."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

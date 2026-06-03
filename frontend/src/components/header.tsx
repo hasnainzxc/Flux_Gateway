@@ -1,3 +1,5 @@
+// Dashboard header — theme toggle button and notification bell (bell is placeholder, not wired up)
+
 "use client"
 
 import { useTheme } from "@/components/theme-provider"

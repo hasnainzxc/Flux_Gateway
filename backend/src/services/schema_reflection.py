@@ -1,3 +1,5 @@
+"""Schema reflection service — introspect PostgreSQL databases via information_schema + pg_catalog."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -12,20 +14,32 @@ logger = structlog.get_logger(__name__)
 
 
 class SchemaReflectionService:
+    """
+    Connects to external PostgreSQL databases and extracts full schema metadata:
+    tables, columns, primary keys, foreign keys, indexes, row counts, sizes.
+    """
+
     def __init__(self, connection_string: str):
         self._dsn = connection_string
 
     async def reflect(self) -> dict[str, Any]:
+        """
+        Full schema introspection. Returns structured graph with tables, relationships, metadata.
+        Used by agent for SQL generation + validation.
+        """
+        # Connect directly to external DB — no connection pooling (one-shot reflection)
         conn = await asyncpg.connect(self._dsn)
 
         try:
+            # Parallel-ish: each query is independent, but asyncpg is single-conn
             tables = await self._reflect_tables(conn)
             rows = await self._reflect_columns(conn)
             pks = await self._reflect_primary_keys(conn)
             fks = await self._reflect_foreign_keys(conn)
             indexes = await self._reflect_indexes(conn)
-            version_info = await conn.fetchrow("SELECT version()")
+            version_info = await conn.fetchrow("SELECT version()")  # PostgreSQL version string
 
+            # Build column metadata grouped by table — enriched with PK/FK info below
             columns_by_table: dict[str, list[dict[str, Any]]] = {}
             for row in rows:
                 tname = row["table_name"]
@@ -37,8 +51,8 @@ class SchemaReflectionService:
                     "max_length": row["character_maximum_length"],
                     "numeric_precision": row["numeric_precision"],
                     "numeric_scale": row["numeric_scale"],
-                    "is_primary_key": False,
-                    "foreign_key": None,
+                    "is_primary_key": False,  # enriched below from PK query
+                    "foreign_key": None,  # enriched below from FK query
                 })
 
             pk_columns: dict[str, set[str]] = {}
@@ -102,6 +116,7 @@ class SchemaReflectionService:
             await conn.close()
 
     async def test_connection(self) -> bool:
+        """Quick connectivity test — SELECT 1 with 10s timeout."""
         try:
             conn = await asyncpg.connect(self._dsn, timeout=10)
             await conn.execute("SELECT 1")
@@ -197,12 +212,14 @@ class SchemaReflectionService:
 
 
 async def reflect_schema_for_connection(encrypted_conn_string: bytes) -> dict[str, Any]:
-    decrypted = decrypt_value(encrypted_conn_string)
+    """Decrypt connection string + run full schema reflection. Raises on decrypt failure."""
+    decrypted = decrypt_value(encrypted_conn_string)  # Fernet decrypt — fails if tampered
     service = SchemaReflectionService(decrypted)
     return await service.reflect()
 
 
 async def test_connection(encrypted_conn_string: bytes) -> bool:
+    """Decrypt connection string + test connectivity. Returns False on any error."""
     decrypted = decrypt_value(encrypted_conn_string)
     service = SchemaReflectionService(decrypted)
     return await service.test_connection()

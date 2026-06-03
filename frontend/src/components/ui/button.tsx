@@ -1,3 +1,5 @@
+// Button — primary action component with variants (default, destructive, outline, ghost, link) and sizes
+
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"

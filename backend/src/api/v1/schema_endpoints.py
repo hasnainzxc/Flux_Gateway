@@ -1,3 +1,5 @@
+"""Schema reflection endpoints — introspect external DB, cache in Redis + Postgres."""
+
 from __future__ import annotations
 
 import json
@@ -31,12 +33,14 @@ async def reflect_schema(
     if connection is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
 
+    # Decrypt connection string + introspect external DB schema
     schema_graph = await reflect_schema_for_connection(
         connection.encrypted_connection_string
     )
 
     connection.last_reflected_at = schema_graph.get("reflected_at")
 
+    # Persist to Postgres as durable cache (survives Redis eviction)
     cache_entry = SchemaCache(
         connection_id=connection.id,
         tenant_id=uuid.UUID(tenant_id),
@@ -45,6 +49,7 @@ async def reflect_schema(
     )
     session.add(cache_entry)
 
+    # Also push to Redis for fast reads (1h TTL)
     background_tasks.add_task(
         cache_schema, tenant_id, str(connection_id), schema_graph
     )
@@ -59,10 +64,12 @@ async def get_schema(
     session: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(require_tenant),
 ) -> dict[str, Any]:
+    # Try Redis first (fast path), fall back to Postgres
     cached = await get_cached_schema(tenant_id, str(connection_id))
     if cached:
         return cached
 
+    # Redis miss — load from Postgres cache (latest version)
     result = await session.execute(
         select(SchemaCache)
         .where(SchemaCache.connection_id == connection_id)
@@ -76,6 +83,7 @@ async def get_schema(
             detail="No schema cache found. Reflect the connection first.",
         )
 
+    # Backfill Redis cache from Postgres for subsequent fast reads
     schema_graph: dict[str, Any] = json.loads(cache_entry.schema_graph)
     await cache_schema(tenant_id, str(connection_id), schema_graph)
     return schema_graph
@@ -129,6 +137,7 @@ async def _refresh_schema_background(
     encrypted_conn_string: bytes,
     tenant_id: str,
 ) -> None:
+    """Background task — re-reflect schema + update Redis cache. Errors logged, not raised."""
     import structlog
 
     logger = structlog.get_logger(__name__)
@@ -137,4 +146,6 @@ async def _refresh_schema_background(
         await cache_schema(tenant_id, connection_id, schema_graph)
         logger.info("schema refresh complete", connection_id=connection_id)
     except Exception as e:
+        # Background task failure — logged but not surfaced to client.
+        # Client sees stale cache until next manual refresh.
         logger.error("schema refresh failed", connection_id=connection_id, error=str(e))

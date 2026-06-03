@@ -1,3 +1,5 @@
+"""Researcher node — RAG-powered answer generation for read intents."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,9 +16,14 @@ logger = structlog.get_logger(__name__)
 async def researcher_node(
     state: AgentState, config: dict[str, Any] | None = None
 ) -> dict:
+    """
+    Read-path node: hybrid search (vector + BM25) -> build context -> LLM answer with citations.
+    Gets DB session from config (passed by graph.ainvoke, not FastAPI DI).
+    """
     tenant_id = state["tenant_id"]
     query = state["user_query"]
 
+    # Extract DB session from LangGraph config — not available via FastAPI DI in workers
     session = None
     if config and "configurable" in config:
         session = config["configurable"].get("session")
@@ -30,6 +37,7 @@ async def researcher_node(
             "node_traces": [{"node": "researcher", "chunks_found": 0, "error": "no_session"}],
         }
 
+    # Hybrid search: vector (semantic) + BM25 (keyword), fused via RRF
     search_results = await hybrid_search(session, tenant_id, query, top_k=10)
 
     if not search_results:

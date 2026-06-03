@@ -1,3 +1,5 @@
+"""SQL generation node — uses LLM to generate parameterized queries from schema + user intent."""
+
 from __future__ import annotations
 
 import json
@@ -14,6 +16,11 @@ logger = structlog.get_logger(__name__)
 async def coder_node(
     state: AgentState, config: dict[str, Any] | None = None
 ) -> dict:
+    """
+    Generate SQL from schema + user query using JSON-mode LLM (gpt-4o).
+    Enforces parameterized queries ($1, $2) to prevent injection.
+    Returns generated_code + target_system for downstream validation.
+    """
     schema_graph = state.get("schema_graph") or {}
     query = state["user_query"]
 

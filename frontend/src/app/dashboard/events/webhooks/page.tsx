@@ -1,3 +1,6 @@
+// Webhooks config page — create, toggle, delete webhook endpoints for ingesting external events
+// Shows generated ingest URL with copy button, displays secret once on creation (cannot be retrieved again)
+
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
@@ -83,6 +86,7 @@ export default function WebhooksPage() {
     }
   }
 
+  // Copy to clipboard — no visual feedback, TODO: add toast confirmation
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
   }

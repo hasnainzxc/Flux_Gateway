@@ -1,3 +1,5 @@
+"""WebSocket endpoint for real-time event/agent status streaming."""
+
 from __future__ import annotations
 
 import json
@@ -15,6 +17,7 @@ router = APIRouter(tags=["websocket"])
 
 @router.websocket("/ws/{tenant_id}")
 async def websocket_endpoint(websocket: WebSocket, tenant_id: str, token: str = "") -> None:
+    # WS auth: token passed as query param (WS can't use Authorization header easily)
     if not token:
         await websocket.close(code=4001, reason="Missing authentication token")
         return
@@ -25,6 +28,7 @@ async def websocket_endpoint(websocket: WebSocket, tenant_id: str, token: str = 
 
     from src.db.models import ApiKey
 
+    # Only API key auth supported for WS — JWT not implemented here
     key_hash = sha256(token.encode()).hexdigest()
 
     async for session in get_db():
@@ -36,19 +40,23 @@ async def websocket_endpoint(websocket: WebSocket, tenant_id: str, token: str = 
         )
         api_key = result.scalar_one_or_none()
 
+        # Verify key exists AND belongs to the tenant in the URL path
         if api_key is None or str(api_key.tenant_id) != tenant_id:
             await websocket.close(code=4003, reason="Invalid or unauthorized token")
             return
         break
 
+    # Register connection in manager — enables broadcast to this tenant
     await manager.connect(websocket, tenant_id)
 
     try:
+        # Send connection confirmation
         await websocket.send_text(json.dumps({
             "type": "connected",
             "data": {"tenant_id": tenant_id, "message": "WebSocket connected to Flux Gateway"},
         }))
 
+        # Keep-alive loop — respond to pings, ignore other messages
         while True:
             data = await websocket.receive_text()
             try:
@@ -56,7 +64,7 @@ async def websocket_endpoint(websocket: WebSocket, tenant_id: str, token: str = 
                 if msg.get("type") == "ping":
                     await websocket.send_text(json.dumps({"type": "pong"}))
             except json.JSONDecodeError:
-                pass
+                pass  # silently ignore malformed messages
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, tenant_id)

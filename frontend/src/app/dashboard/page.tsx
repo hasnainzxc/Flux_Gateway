@@ -1,3 +1,6 @@
+// Dashboard home — shows usage stats cards (agent runs, docs, connections, tokens) + getting started guide
+// Fetches usage summary, connection count, and doc count in parallel on mount
+
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
@@ -15,6 +18,7 @@ interface UsageSummary {
   storage_bytes: number
 }
 
+// Format large numbers with K/M suffixes for compact display
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
@@ -26,6 +30,7 @@ export default function DashboardPage() {
   const [connCount, setConnCount] = useState(0)
   const [docCount, setDocCount] = useState(0)
 
+  // Load all stats in parallel — individual .catch() prevents one failure from blocking others
   const loadStats = useCallback(async () => {
     try {
       const [summary, connections, documents] = await Promise.all([
@@ -37,7 +42,7 @@ export default function DashboardPage() {
       setConnCount((connections as unknown[]).length)
       setDocCount((documents as unknown[]).length)
     } catch {
-      // silent
+      // Outer catch for unexpected errors — individual calls already handled above
     }
   }, [])
 

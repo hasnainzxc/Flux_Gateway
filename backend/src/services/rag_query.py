@@ -1,3 +1,5 @@
+"""RAG query pipeline — hybrid search (vector + BM25), reciprocal rank fusion, context building."""
+
 from __future__ import annotations
 
 import math
@@ -11,29 +13,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models.chunk import Chunk
 from src.services.llm import generate_embeddings_fallback
 
-BM25_K1 = 1.5
-BM25_B = 0.75
-RRF_K = 60
-VECTOR_WEIGHT = 0.7
+# BM25 tuning params
+BM25_K1 = 1.5  # term frequency saturation
+BM25_B = 0.75  # length normalization
+RRF_K = 60  # reciprocal rank fusion constant
+VECTOR_WEIGHT = 0.7  # vector similarity gets more weight than keyword
 BM25_WEIGHT = 0.3
 
+# In-memory BM25 index cache per tenant — invalidated on doc upload/delete
 _bm25_indexes: dict[UUID, BM25Index] = {}
 
 
 def _tokenize(text: str) -> list[str]:
+    """Simple whitespace + lowercase tokenizer for BM25."""
     return re.findall(r"\w+", text.lower())
 
 
 class BM25Index:
+    """
+    In-memory BM25 index for keyword search. Built once per tenant, cached until invalidated.
+    Complements vector search — catches exact matches, acronyms, domain terms embeddings miss.
+    """
+
     def __init__(self) -> None:
         self.corpus_tokens: list[list[str]] = []
         self.doc_lengths: list[int] = []
         self.avgdl: float = 0.0
-        self.df: dict[str, int] = defaultdict(int)
+        self.df: dict[str, int] = defaultdict(int)  # document frequency per term
         self.N: int = 0
         self.chunk_ids: list[UUID] = []
 
     def index_chunks(self, chunks: list[tuple[UUID, str]]) -> None:
+        """Build index from (chunk_id, content) pairs. Computes IDF stats."""
         for chunk_id, content in chunks:
             tokens = _tokenize(content)
             self.corpus_tokens.append(tokens)
@@ -48,11 +59,13 @@ class BM25Index:
             self.avgdl = sum(self.doc_lengths) / self.N
 
     def compute_idf(self, term: str) -> float:
+        """Inverse document frequency — rare terms score higher."""
         if term not in self.df or self.df[term] == 0:
             return 0.0
         return math.log(1 + (self.N - self.df[term] + 0.5) / (self.df[term] + 0.5))
 
     def score(self, query_tokens: list[str]) -> list[tuple[UUID, float]]:
+        """Score all docs against query, return sorted by BM25 score desc."""
         if self.N == 0:
             return []
         scores: list[tuple[UUID, float]] = []
@@ -77,6 +90,7 @@ class BM25Index:
 async def _get_or_build_bm25_index(
     session: AsyncSession, tenant_id: UUID
 ) -> BM25Index:
+    """Load or build BM25 index for tenant. Cached in-memory until invalidated."""
     if tenant_id in _bm25_indexes:
         return _bm25_indexes[tenant_id]
 
@@ -94,6 +108,7 @@ async def _get_or_build_bm25_index(
 
 
 def _invalidate_bm25_index(tenant_id: UUID) -> None:
+    """Clear cached BM25 index — call after doc upload/delete."""
     _bm25_indexes.pop(tenant_id, None)
 
 
@@ -103,17 +118,18 @@ async def vector_search(
     query_embedding: list[float],
     top_k: int = 10,
 ) -> list[tuple[UUID, float]]:
-
+    """pgvector cosine similarity search. Returns (chunk_id, similarity_score)."""
+    # cosine_distance returns 0..2 (0=identical, 2=opposite), convert to similarity
     distance = Chunk.embedding.cosine_distance(query_embedding).label("distance")
-    similarity = (1 - distance).label("similarity")
+    similarity = (1 - distance).label("similarity")  # 1=identical, -1=opposite
 
     result = await session.execute(
         select(Chunk.id, similarity)
         .where(
             Chunk.tenant_id == tenant_id,
-            Chunk.embedding.isnot(None),
+            Chunk.embedding.isnot(None),  # skip chunks without embeddings
         )
-        .order_by(distance)
+        .order_by(distance)  # ascending distance = descending similarity
         .limit(top_k)
     )
     return [(row[0], float(row[1])) for row in result.all()]
@@ -125,6 +141,7 @@ async def bm25_search(
     query: str,
     top_k: int = 10,
 ) -> list[tuple[UUID, float]]:
+    """Keyword search via in-memory BM25. Complements vector search."""
     bm25 = await _get_or_build_bm25_index(session, tenant_id)
     query_tokens = _tokenize(query)
     results = bm25.score(query_tokens)
@@ -138,6 +155,10 @@ def reciprocal_rank_fusion(
     vector_weight: float = VECTOR_WEIGHT,
     bm25_weight: float = BM25_WEIGHT,
 ) -> list[tuple[UUID, float]]:
+    """
+    Combine vector + BM25 rankings using RRF. Each result gets score = weight / (k + rank).
+    Higher-ranked items in either list contribute more. Weighted sum for final ordering.
+    """
     scores: dict[UUID, float] = defaultdict(float)
 
     for rank, (chunk_id, _) in enumerate(vector_results):
@@ -157,23 +178,36 @@ async def hybrid_search(
     query: str,
     top_k: int = 10,
 ) -> list[dict]:
+    """
+    Full hybrid search pipeline:
+    1. Embed query
+    2. Vector search (semantic)
+    3. BM25 search (keyword)
+    4. RRF fusion
+    5. Fetch full chunk data for top results
+    """
+    # Step 1: Embed the query text
     query_embedding_list = await generate_embeddings_fallback([query])
     query_embedding = query_embedding_list[0]
 
+    # Step 2+3: Fetch 2x candidates from each source, let RRF pick the best
     vec_results = await vector_search(session, tenant_id, query_embedding, top_k * 2)
     bm25_results = await bm25_search(session, tenant_id, query, top_k * 2)
 
+    # Step 4: Fuse rankings via RRF — items appearing in both lists get boosted
     fused = reciprocal_rank_fusion(vec_results, bm25_results)
     top_chunk_ids = [chunk_id for chunk_id, _ in fused[:top_k]]
 
     if not top_chunk_ids:
         return []
 
+    # Step 5: Fetch full chunk records for top results
     result = await session.execute(
         select(Chunk).where(Chunk.id.in_(top_chunk_ids))
     )
     chunk_map = {c.id: c for c in result.scalars().all()}
 
+    # Build output in fused-rank order (not DB order)
     output = []
     for chunk_id, score in fused[:top_k]:
         chunk = chunk_map.get(chunk_id)
@@ -193,6 +227,10 @@ async def build_context_from_results(
     results: list[dict],
     max_tokens: int = 3000,
 ) -> tuple[str, list[dict]]:
+    """
+    Build LLM context string from search results. Numbered [1], [2], etc. for citations.
+    Stops when token budget exhausted. Returns (context_text, citation_metadata).
+    """
     context_parts: list[str] = []
     citations: list[dict] = []
     token_count = 0

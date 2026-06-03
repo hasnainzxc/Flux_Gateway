@@ -1,3 +1,5 @@
+"""Citation model — tracks which chunks were used to answer a query."""
+
 from __future__ import annotations
 
 import uuid
@@ -11,6 +13,8 @@ from src.db.models import Base
 
 
 class Citation(Base):
+    """Links a chunk to a query response with relevance score for audit/feedback."""
+
     __tablename__ = "citations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

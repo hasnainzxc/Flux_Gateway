@@ -1,3 +1,6 @@
+// Documents page — drag-and-drop file upload for RAG indexing (PDF, MD, TXT, HTML)
+// Lists uploaded docs with status, chunk count, and delete action
+
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
@@ -39,6 +42,8 @@ export default function DocsPage() {
     fetchDocs()
   }, [])
 
+  // Upload files sequentially — parallel uploads could overwhelm backend for large batches
+  // TODO: Add progress indicator per file, show toast on individual failures
   const onDrop = useCallback(async (files: File[]) => {
     setUploading(true)
     for (const file of files) {

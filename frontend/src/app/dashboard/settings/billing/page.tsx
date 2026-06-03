@@ -1,3 +1,6 @@
+// Usage & billing page — shows token/resource consumption stats, usage history chart, and behavior rules
+// Behavior rules automate agent workflows triggered by webhook events (e.g., low inventory -> alert)
+
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
@@ -54,6 +57,7 @@ function formatNumber(n: number): string {
   return String(n)
 }
 
+// Format bytes to human-readable (B/KB/MB/GB)
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`

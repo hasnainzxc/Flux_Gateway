@@ -1,3 +1,6 @@
+// Connections management page — list, add, delete DB connections
+// Cards navigate to detail view on click, delete button stops propagation to prevent nav
+
 "use client"
 
 import { useEffect, useState } from "react"
@@ -5,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
 import { Plus, Plug, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -33,13 +36,18 @@ export default function ConnectionsPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Create connection — hardcoded to PostgreSQL for now, refetch list on success
+  // TODO: Add db_type selector, validate port is numeric, show error toast on failure
   const handleAdd = async () => {
+    if (!form.name.trim() || !form.host.trim()) return
+    const port = parseInt(form.port)
+    if (isNaN(port)) return
     try {
       await api.createConnection({
         name: form.name,
         db_type: "postgresql",
         host: form.host,
-        port: parseInt(form.port),
+        port,
         database: form.database,
         username: form.username,
         password: form.password,
@@ -52,7 +60,10 @@ export default function ConnectionsPage() {
     }
   }
 
+  // Delete connection — no confirmation dialog, optimistic update removes from list
+  // TODO: Add confirmation for destructive action
   const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this connection? This cannot be undone.")) return
     await api.deleteConnection(id)
     setConnections((prev) => prev.filter((c) => c.id !== id))
   }
@@ -115,18 +126,20 @@ export default function ConnectionsPage() {
       </div>
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogHeader>
-          <DialogTitle>Add PostgreSQL Connection</DialogTitle>
-        </DialogHeader>
-        <div className="mt-4 space-y-3">
-          <Input placeholder="Connection name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input placeholder="Host" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} />
-          <Input placeholder="Port" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} />
-          <Input placeholder="Database" value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} />
-          <Input placeholder="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
-          <Input placeholder="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          <Button className="w-full" onClick={handleAdd}>Save Connection</Button>
-        </div>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add PostgreSQL Connection</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Connection name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <Input placeholder="Host" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} />
+            <Input placeholder="Port" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} />
+            <Input placeholder="Database" value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} />
+            <Input placeholder="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
+            <Input placeholder="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <Button className="w-full" onClick={handleAdd}>Save Connection</Button>
+          </div>
+        </DialogContent>
       </Dialog>
     </div>
   )

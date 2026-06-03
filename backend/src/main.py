@@ -1,3 +1,5 @@
+"""Flux Gateway — FastAPI app entrypoint. Wires routers, middleware, lifespan hooks."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -29,19 +31,27 @@ logger = get_logger(__name__)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Inject OWASP-recommended security headers into every response."""
+
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         response = await call_next(request)
+        # Prevent MIME sniffing, clickjacking, and enforce HTTPS
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        # HSTS: tell browsers to only use HTTPS for 1 year
         response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        # Block Flash/cross-domain policy files — no legacy plugin support needed
         response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        # Only send origin (not full URL) in referrer to avoid leaking query params
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Startup/shutdown hook — eagerly init Redis pool, tear down on exit."""
     logger.info("flux gateway starting", environment=settings.environment)
+    # Lazy import to avoid circular deps at module load time
     from src.core.redis_client import get_redis
     await get_redis()
     yield
@@ -57,15 +67,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# NOTE: middleware order matters — outermost runs last on response
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
+    # TODO: tighten allow_origins for production — currently dev-only
     allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# All REST routers mounted under /api/v1 — WebSocket lives at root /ws/{tenant_id}
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(api_keys_router, prefix="/api/v1")
 app.include_router(connections_router, prefix="/api/v1")
@@ -78,9 +91,11 @@ app.include_router(events_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(behavior_rules_router, prefix="/api/v1")
 app.include_router(usage_router, prefix="/api/v1")
+# WS router has no prefix — mounts at /ws/{tenant_id} directly
 app.include_router(ws_router)
 
 
 @app.get("/health")
 async def health_check() -> dict[str, str]:
+    """Liveness probe for k8s/load balancers. No DB check — keep it fast."""
     return {"status": "ok", "environment": settings.environment}

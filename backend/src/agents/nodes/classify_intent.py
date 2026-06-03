@@ -1,3 +1,5 @@
+"""Intent classification node — LLM determines if query is read (SELECT) or write (INSERT/UPDATE/DELETE)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -13,6 +15,10 @@ logger = structlog.get_logger(__name__)
 async def classify_intent_node(
     state: AgentState, config: dict[str, Any] | None = None
 ) -> dict:
+    """
+    Classify user query as 'read' or 'write' using cheap/fast model (gpt-4o-mini).
+    Defaults to 'read' on ambiguous output (safer — read-only path).
+    """
     messages = [
         {
             "role": "system",
@@ -31,6 +37,7 @@ async def classify_intent_node(
     )
     intent_raw = response.strip().lower()
 
+    # Normalize to read/write, default to read if unclear
     intent: str
     if intent_raw == "write":
         intent = "write"

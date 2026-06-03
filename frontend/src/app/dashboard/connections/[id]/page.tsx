@@ -1,3 +1,6 @@
+// Connection detail page — displays reflected schema (tables + columns) for a single connection
+// Allows triggering schema reflection, shows PK indicators and data types
+
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
@@ -9,6 +12,7 @@ import { api } from "@/lib/api"
 import { RefreshCw, Key, Hash } from "lucide-react"
 
 export default function ConnectionDetailPage() {
+  // useParams returns string | string[] — normalize to string, fallback to "unknown" if missing
   const params: Record<string, string | string[] | undefined> = useParams()
   const id = String(params.id ?? "unknown")
   const [schema, setSchema] = useState<unknown>(null)

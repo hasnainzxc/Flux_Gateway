@@ -1,3 +1,5 @@
+// Card — content container with header, title, description, content, and footer sections
+
 import * as React from "react"
 import { cn } from "@/lib/utils"
 

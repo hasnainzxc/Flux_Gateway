@@ -1,3 +1,9 @@
+"""arq worker tasks — async job processing for events + agent runs.
+
+Jobs are enqueued via Redis from API endpoints, picked up here by arq workers.
+Each task manages its own DB session (not FastAPI DI).
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -12,6 +18,14 @@ logger = get_logger(__name__)
 
 
 async def process_event(ctx: dict, event_id: str, tenant_id: str) -> dict:
+    """
+    Process a webhook event end-to-end:
+    1. Load EventLog from DB
+    2. Mark as processing
+    3. Run agent pipeline
+    4. Mark completed/failed + track usage
+    5. Broadcast status via WebSocket
+    """
     from src.db.session import async_session_factory
     from src.services.websocket_manager import manager
 
@@ -20,6 +34,7 @@ async def process_event(ctx: dict, event_id: str, tenant_id: str) -> dict:
 
         from src.db.models.event import EventLog
 
+        # Load event record — verify it exists before processing
         result = await session.execute(
             select(EventLog).where(EventLog.id == uuid.UUID(event_id))
         )
@@ -29,6 +44,7 @@ async def process_event(ctx: dict, event_id: str, tenant_id: str) -> dict:
             logger.error("event_not_found", event_id=event_id)
             return {"status": "error", "message": "event not found"}
 
+        # Transition: queued -> processing
         await session.execute(
             update(EventLog)
             .where(EventLog.id == event.id)
@@ -36,6 +52,7 @@ async def process_event(ctx: dict, event_id: str, tenant_id: str) -> dict:
         )
         await session.commit()
 
+        # Notify WebSocket subscribers of status change
         await manager.send_event_update(tenant_id, {
             "event_id": event_id,
             "status": "processing",
@@ -47,13 +64,16 @@ async def process_event(ctx: dict, event_id: str, tenant_id: str) -> dict:
                 "event_id": event_id,
             })
 
+            # Run full agent pipeline — classify -> research/code -> review -> exec
             from src.agents.graph import run_agent
             agent_result = await run_agent(
                 session=session,
                 tenant_id=tenant_id,
+                # Construct query from event type + payload for agent to process
                 user_query=f"Process webhook event: {event.event_type}. Payload: {event.payload}",
             )
 
+            # Transition: processing -> completed
             completed_at = datetime.now(UTC)
             await session.execute(
                 update(EventLog)
@@ -107,6 +127,7 @@ async def process_event(ctx: dict, event_id: str, tenant_id: str) -> dict:
 async def run_agent_task(
     ctx: dict, tenant_id: str, query: str, connection_id: str | None = None
 ) -> dict:
+    """Standalone agent run (not triggered by webhook). Used for async agent queries."""
     from src.db.session import async_session_factory
     from src.services.websocket_manager import manager
 
@@ -159,11 +180,13 @@ async def shutdown(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [process_event, run_agent_task]
+    """arq worker configuration — picked up by `arq src.workers.WorkerSettings`."""
+
+    functions = [process_event, run_agent_task]  # registered job handlers
     on_startup = startup
     on_shutdown = shutdown
-    max_jobs = 10
-    max_tries = 3
-    job_timeout = 300
+    max_jobs = 10  # concurrent job limit per worker process
+    max_tries = 3  # retry failed jobs up to 3 times
+    job_timeout = 300  # 5 min max per job — agent pipelines can be slow
 
     redis_settings = RedisSettings.from_dsn(settings.redis_url)

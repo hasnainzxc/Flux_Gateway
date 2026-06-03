@@ -1,3 +1,5 @@
+"""Event log endpoints — list, get, retry failed events."""
+
 from __future__ import annotations
 
 import uuid
@@ -31,9 +33,11 @@ async def list_events(
     tenant_id: str = Depends(authenticate),
     session: AsyncSession = Depends(get_db),
 ) -> EventListResponse:
+    # Build base query + parallel count query — both scoped to tenant
     query = select(EventLog).where(EventLog.tenant_id == tenant_id)
     count_query = select(func.count()).select_from(EventLog).where(EventLog.tenant_id == tenant_id)
 
+    # Optional filters — applied to both data + count queries
     if status_filter:
         query = query.where(EventLog.status == status_filter)
         count_query = count_query.where(EventLog.status == status_filter)
@@ -125,6 +129,7 @@ async def retry_event(
     if event.status != "failed":
         raise HTTPException(status_code=400, detail="Only failed events can be retried")
 
+    # Re-queue failed event via arq worker pool — picks up in process_event task
     from arq import create_pool
     from arq.connections import RedisSettings
 
@@ -132,6 +137,6 @@ async def retry_event(
 
     pool = await create_pool(RedisSettings.from_dsn(app_settings.redis_url))
     await pool.enqueue_job("process_event", str(event.id), tenant_id)
-    await pool.close()
+    await pool.close()  # close pool, not the Redis connection
 
     return {"status": "queued", "event_id": str(event.id)}

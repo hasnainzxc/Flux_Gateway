@@ -1,7 +1,12 @@
+// API proxy route — forwards all /api/* requests to backend server
+// Used to avoid CORS issues and hide backend URL from client, injects server-side API key
+// WARNING: No rate limiting or request validation — backend must enforce auth
+
 import { NextResponse } from "next/server"
 
 const BACKEND_URL = process.env.BACKEND_API_URL || "http://localhost:8000"
 
+// Generic proxy handler — forwards method, body, and query params to backend
 async function proxy(method: string, request: Request, pathSegments: string[]) {
   const url = `${BACKEND_URL}/${pathSegments.join("/")}`
   const headers: Record<string, string> = {
@@ -13,6 +18,7 @@ async function proxy(method: string, request: Request, pathSegments: string[]) {
     headers["Content-Type"] = "application/json"
   }
 
+  // Forward query params from original request
   const searchParams = new URL(request.url).searchParams
   const fullUrl = searchParams.size > 0 ? `${url}?${searchParams}` : url
 

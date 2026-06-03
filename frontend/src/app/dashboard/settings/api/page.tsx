@@ -1,3 +1,6 @@
+// API keys management — create, list, revoke keys for programmatic SDK/API access
+// Shows key prefix for identification, full key only shown once on creation (handled by backend)
+
 "use client"
 
 import { useEffect, useState } from "react"
@@ -48,10 +51,12 @@ export default function ApiKeysPage() {
   }
 
   const handleRevoke = async (id: string) => {
+    if (!window.confirm("Revoke this API key? Any integrations using it will stop working.")) return
     await api.revokeApiKey(id)
     fetchKeys()
   }
 
+  // Copy with 2s checkmark feedback — resets after timeout
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
     setCopied(text)
