@@ -164,82 +164,87 @@ Docker v24+       # docker --version (with Compose v2)
 
 ```bash
 git clone <repo-url> && cd Flux_gateway
-
-# Create environment file
 cp .env.template .env
 ```
 
-Edit `.env` — required variables:
+Edit `.env`:
 
 ```bash
 # Required
-DATABASE_URL=postgresql+asyncpg://flux:flux@localhost:5432/flux_gateway
-REDIS_URL=redis://localhost:6379/0
+DATABASE_URL=postgresql+asyncpg://flux:flux_dev@localhost:5432/flux_gateway
+REDIS_URL=redis://:flux_redis_dev@localhost:6379/0
 OPENROUTER_API_KEY=sk-or-v1-...
+SECRET_KEY=changeme-in-production
+ENVIRONMENT=development
 
-# Optional (for OIDC auth)
+# Optional (OIDC auth)
 OIDC_ISSUER=https://accounts.google.com
 OIDC_CLIENT_ID=...
 OIDC_CLIENT_SECRET=...
 
-# Optional (for Stripe billing)
+# Optional (Stripe billing)
 STRIPE_SECRET_KEY=sk_test_...
 ```
 
-### 2. Start Infrastructure
+### 2. Start Everything with Docker
 
 ```bash
-# Start PostgreSQL + Redis
+# Full stack: PostgreSQL + Redis + Backend (containerized)
+docker compose up -d
+
+# Or just infrastructure for local dev:
+docker compose up -d postgres redis
+```
+
+**Services:**
+
+| Service | Port | Description |
+|---------|------|-------------|
+| PostgreSQL | `5432` | Database with pgvector extension |
+| Redis | `6379` | Cache, pub/sub, job queue |
+| Backend API | `8000` | FastAPI server + Swagger docs |
+
+```bash
+# Verify all containers healthy
+docker compose ps
+
+# View logs
+docker compose logs -f backend
+
+# Run migrations (first time only)
+docker compose exec backend alembic upgrade head
+```
+
+### 3. Local Development (Recommended)
+
+Run backend and frontend locally for hot-reload:
+
+```bash
+# Terminal 1: Start DB + Redis only
 docker compose up -d postgres redis
 
-# Verify
-docker compose ps
-# postgres    Up (healthy)
-# redis       Up (healthy)
-```
-
-### 3. Start Backend
-
-```bash
+# Terminal 2: Backend (hot-reload)
 cd backend
-
-# Install dependencies
 pip install -e ".[dev,ml]"
-
-# Run migrations
 alembic upgrade head
+python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Start API server
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-```
+# Terminal 3: Frontend (hot-reload)
+cd frontend
+npm install
+npm run dev
 
-### 4. Start Workers (Optional)
-
-```bash
+# Terminal 4: ARQ workers (optional, for async jobs)
 cd backend
-
-# Start ARQ worker pool for async job processing
 arq src.workers.tasks.WorkerSettings
 ```
 
-### 5. Start Frontend
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start dev server
-npm run dev
-```
-
-### 6. Verify
+### 4. Verify
 
 ```bash
 # Backend health
 curl http://localhost:8000/health
-# {"status":"ok"}
+# {"status":"ok","environment":"development"}
 
 # Create API key
 curl -X POST http://localhost:8000/api/v1/api-keys \
@@ -247,8 +252,17 @@ curl -X POST http://localhost:8000/api/v1/api-keys \
   -d '{"name":"test-key"}'
 # {"id":"...","key":"sk-...","name":"test-key"}
 
-# Open dashboard
+# Swagger docs
+open http://localhost:8000/docs
+
+# Dashboard
 open http://localhost:3000/dashboard
+```
+
+### One-Liner (Full Stack)
+
+```bash
+docker compose up -d && sleep 5 && docker compose exec backend alembic upgrade head && curl http://localhost:8000/health
 ```
 
 ---
