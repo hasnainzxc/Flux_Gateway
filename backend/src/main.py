@@ -49,15 +49,56 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Startup/shutdown hook — eagerly init Redis pool, tear down on exit."""
+    """Startup/shutdown hook — eagerly init Redis pool, bootstrap dev tenant, tear down on exit."""
     logger.info("flux gateway starting", environment=settings.environment)
-    # Lazy import to avoid circular deps at module load time
     from src.core.redis_client import get_redis
     await get_redis()
+    await _bootstrap_dev_tenant()
     yield
     from src.core.redis_client import close_redis
     await close_redis()
     logger.info("flux gateway shutting down")
+
+
+async def _bootstrap_dev_tenant() -> None:
+    """Create default tenant + API key if none exist — for local dev without OIDC."""
+    import uuid
+    from hashlib import sha256
+    from sqlalchemy import select
+    from src.db.models import Tenant, ApiKey
+    from src.db.session import async_session_factory
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(Tenant).limit(1))
+        if result.scalar_one_or_none() is not None:
+            return
+
+        tenant = Tenant(
+            id=uuid.uuid4(),
+            name="Dev Tenant",
+            slug="dev",
+        )
+        session.add(tenant)
+        await session.flush()
+
+        import secrets
+        raw_key = f"sk-{secrets.token_hex(32)}"
+        key_hash = sha256(raw_key.encode()).hexdigest()
+        api_key = ApiKey(
+            tenant_id=tenant.id,
+            name="Dev Bootstrap Key",
+            key_hash=key_hash,
+            key_prefix=raw_key[:10],
+        )
+        session.add(api_key)
+        await session.commit()
+
+        logger.info("dev bootstrap complete", tenant_id=str(tenant.id), api_key=raw_key)
+        print(f"\n{'='*60}")
+        print(f"  DEV API KEY: {raw_key}")
+        print(f"  Tenant ID:   {tenant.id}")
+        print(f"  Paste this key into Settings → API Keys to get started")
+        print(f"{'='*60}\n")
 
 
 app = FastAPI(
