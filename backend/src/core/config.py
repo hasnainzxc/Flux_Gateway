@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     sandbox_memory_limit: str = "256m"
     sandbox_cpu_quota: int = 50000  # 50% of one CPU core (100000 = 100%)
 
+    # MCP write-back — executes validated SQL against tenant's PostgreSQL database.
+    # Default OFF (dry-run only) — set true to enable real database writes.
+    mcp_execute_enabled: bool = False
+    mcp_statement_timeout: int = 30  # seconds
+
     @property
     def is_development(self) -> bool:
         return self.environment == "development"

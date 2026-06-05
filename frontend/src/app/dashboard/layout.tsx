@@ -1,10 +1,8 @@
-// Dashboard shell layout — persistent sidebar + header with scrollable content area
-// Wraps all /dashboard/* routes, "use client" needed for sidebar state
-
 "use client"
 
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
+import { AuthGuard } from "@/components/auth-guard"
 
 export default function DashboardLayout({
   children,
@@ -12,12 +10,14 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+    <AuthGuard>
+      <div className="flex h-screen overflow-hidden">
+        <Sidebar />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header />
+          <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </AuthGuard>
   )
 }

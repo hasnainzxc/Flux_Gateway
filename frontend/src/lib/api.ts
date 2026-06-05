@@ -31,15 +31,46 @@ function getApiKey(): string {
   return globalApiKey || ""
 }
 
-// Generic request wrapper — injects auth header, parses JSON or text errors
+// Retrieve JWT token from localStorage (set during OIDC login)
+export function getJwtToken(): string {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("flux_jwt_token") || ""
+  }
+  return ""
+}
+
+// Check if user is authenticated — has either API key or JWT token
+export function isAuthenticated(): boolean {
+  if (typeof window === "undefined") return false
+  return !!(localStorage.getItem("flux_api_key") || localStorage.getItem("flux_jwt_token"))
+}
+
+// Clear all auth-related localStorage keys
+export function clearAuth(): void {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("flux_api_key")
+    localStorage.removeItem("flux_jwt_token")
+    localStorage.removeItem("flux_tenant_id")
+  }
+}
+
+// Generic request wrapper — injects auth header (API key or JWT), parses JSON or text errors
 // Throws ApiError on non-2xx responses with status code and body for debugging
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const apiKey = getApiKey()
+  const jwtToken = getJwtToken()
+  const authHeaders: Record<string, string> = {}
+  if (apiKey) {
+    authHeaders["X-API-Key"] = apiKey
+  } else if (jwtToken) {
+    authHeaders["Authorization"] = `Bearer ${jwtToken}`
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(apiKey ? { "X-API-Key": apiKey } : {}),
+      ...authHeaders,
       ...options?.headers,
     },
   })
@@ -141,6 +172,40 @@ export const api = {
     }),
   revokeApiKey: (id: string) =>
     request(`/api/v1/api-keys/${id}`, { method: "DELETE" }),
+
+  // Validate an API key by testing it against a lightweight endpoint
+  // Returns the response data if valid, throws ApiError if invalid
+  validateApiKey: async (key: string) => {
+    const res = await fetch(`${API_BASE}/api/v1/api-keys`, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": key,
+      },
+    })
+    if (!res.ok) {
+      let body: unknown
+      try {
+        body = await res.json()
+      } catch {
+        body = await res.text()
+      }
+      throw new ApiError(res.status, body)
+    }
+    return res.json()
+  },
+
+  // Redirect to backend OIDC login flow
+  login: () => {
+    window.location.href = `${API_BASE}/api/v1/auth/login`
+  },
+
+  // Create API key with explicit auth header (used during onboarding with JWT)
+  createApiKeyWithAuth: (name: string, authToken: string) =>
+    request("/api/v1/api-keys", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ name }),
+    }),
 
   // === Events ===
   // Paginated event list with optional filters — builds query string manually to handle sparse params

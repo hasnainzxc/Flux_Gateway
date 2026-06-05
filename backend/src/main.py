@@ -64,8 +64,10 @@ async def _bootstrap_dev_tenant() -> None:
     """Create default tenant + API key if none exist — for local dev without OIDC."""
     import uuid
     from hashlib import sha256
+
     from sqlalchemy import select
-    from src.db.models import Tenant, ApiKey
+
+    from src.db.models import ApiKey, Tenant
     from src.db.session import async_session_factory
 
     async with async_session_factory() as session:
@@ -97,7 +99,7 @@ async def _bootstrap_dev_tenant() -> None:
         print(f"\n{'='*60}")
         print(f"  DEV API KEY: {raw_key}")
         print(f"  Tenant ID:   {tenant.id}")
-        print(f"  Paste this key into Settings → API Keys to get started")
+        print("  Paste this key into Settings → API Keys to get started")
         print(f"{'='*60}\n")
 
 
