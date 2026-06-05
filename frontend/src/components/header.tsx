@@ -43,6 +43,7 @@ function LogoutButton() {
   const router = useRouter()
   const [tenantId, setTenantId] = React.useState<string | null>(null)
 
+  // Read tenant_id from localStorage on mount (client-only to avoid SSR mismatch)
   React.useEffect(() => {
     if (typeof window !== "undefined") {
       setTenantId(localStorage.getItem("flux_tenant_id"))
