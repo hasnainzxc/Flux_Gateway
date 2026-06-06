@@ -2,307 +2,159 @@
 
 > Full reference: **[MASTER_GUIDE.md](MASTER_GUIDE.md)** — architecture, decision rationale, security model, agent topology, dev→prod evolution, API reference
 >
-> **Date**: 2026-06-04
-> **Phase**: Stage 3 Complete + UI Foundation Refactor (Phase 0)
-> **Last Commit**: pending — audit, comments, bug fixes, Phase 0 foundation
+> **Date**: 2026-06-05
+> **Honest Phase**: **Stage 2.5 — read-path MVP, write-path stubbed, pre-hardening**
+> **NOT** "Stage 3 Complete" (prior label was aspirational; this doc was rewritten against verified code reality on 2026-06-05)
 
 ---
 
-## Recap: What was built (3 days)
+## TL;DR (Verified Reality)
 
-### Stage 1 — Core Infrastructure (Weeks 1-4)
+- **Backend is ~75% real.** Read flow works end-to-end. Auth, tenant isolation, schema reflection, RAG, LLM, Docker sandbox, LangGraph agent (6 of 7 nodes) are genuinely implemented.
+- **Write flow is FAKE at the last step.** The MCP Executor node is a stub — it returns a hardcoded `{"status":"simulated"}`. `mcp_client.py` does not exist. The core "agent writes back to your data" feature does not actually execute.
+- **Frontend has real data wiring but NO auth/onboarding.** 10 pages call real APIs. There is no login page, no auth guard on `/dashboard`, no frontend OIDC flow, and a bootstrap paradox (you need an API key to mint an API key).
+- **Quality infra is near-absent.** ~0% business-logic test coverage (only a health-check test), zero CI/CD, lint/type configured but unenforced. Stripe is a declared dependency that is never imported.
 
-**Goal**: Connect any PostgreSQL DB → reflect schema → NL query about schema.
+This document supersedes the previous self-reported "everything Done" status table.
 
-| Component | What it does |
-|-----------|-------------|
-| Monorepo scaffold | `backend/` + `frontend/` + `docs/` + `docker-compose.yml` |
-| Multi-tenant DB | 6 tables (`tenants`, `users`, `api_keys`, `connections`, `schema_cache`, `credentials`) + Alembic migrations |
-| Tenant isolation | Triple-layer: DB Row-Level Security → ORM listener → FastAPI dependency. Tenant A CANNOT see Tenant B data, ever |
-| Auth (dual-mode) | API keys (`sk-` prefix, hashed storage) + OIDC/JWT for web login |
-| Schema reflection | `asyncpg` queries `information_schema` (metadata only, no user rows). Builds JSON schema graph with tables/columns/keys/indexes/relationships. Cached in Redis (TTL 1hr) |
-| LLM integration | OpenRouter client. Schema-grounded NL queries — asks `gpt-4o-mini` "what tables are in my database?" with system prompt containing only real column names. No hallucinated column names |
-| Security | AES-256-GCM credential encryption, rate limiting (100req/60s per tenant), audit logging, security headers |
+---
 
-### Stage 2 — Productization (Weeks 5-8)
+## What is actually built vs claimed
 
-**Goal**: Full dashboard. Connect DB → explore schema → upload docs → get cited answers.
+### Backend — REAL (verified in code)
 
-| Component | What it does |
-|-----------|-------------|
-| RAG ingestion | Upload PDF/MD/HTML/TXT → PyMuPDF parsing → tiktoken semantic chunking (1000t chunk, 200t overlap) → OpenAI embeddings (1536d) → pgvector storage. All tenant-scoped |
-| Hybrid search | pgvector cosine distance + BM25 lexical (per-tenant in-memory index) → Reciprocal Rank Fusion (k=60, vector weight 0.7, BM25 0.3) — returns top chunks with scores |
-| Citations | Inline `[1]` markers in answers → citation panel shows source doc, page, score, excerpt. Color-coded: green ≥0.9, yellow ≥0.7, red <0.7 |
-| LangGraph agent | 7-node state machine: ClassifyIntent (gpt-4o-mini) → Researcher (reads) / Coder (writes) → Reviewer (validates) → Self-Heal (retry ≤3) → MCP Executor → FormatResponse. READ path: RAG search → LLM answer with citations. WRITE path: schema-grounded SQL → validation → MCP execution |
-| Frontend dashboard | Next.js 16 App Router, Tailwind v4, shadcn/ui + Magic UI + Motion.dev + Geist font. Dark-first theme. 11 pages: Dashboard Home, Connections, Schema Explorer, Agent Chat (with citation badges, token counter, animations), Document Manager (drag-drop upload), Events, Settings (API keys, theme toggle, model selector) |
-| WebSocket client | `frontend/src/lib/ws.ts` — auto-reconnect with exponential backoff, per-tenant connection pool |
-| BFF proxy | Next.js API route forwards all requests to FastAPI backend with X-API-Key header |
+| Component | Status | Evidence |
+|-----------|--------|----------|
+| FastAPI gateway + middleware | ✅ Real | `main.py` registers routers + auth/tenant/rate-limit/CORS/logging MW |
+| Triple-layer tenant isolation | ✅ Real | DB RLS → SQLAlchemy ORM listener → FastAPI dependency |
+| Dual auth (API key + OIDC) | ✅ Real | API keys hashed; `core/oidc.py` full discovery → code-exchange → JWT (python-jose, httpx) |
+| Schema reflection + Redis cache | ✅ Real | `asyncpg` `information_schema` → JSON graph → Redis TTL 1hr |
+| LLM service | ✅ Real | `services/llm.py` AsyncOpenAI → OpenRouter; `llm_complete`/`llm_complete_json`/`generate_embeddings`; local `all-MiniLM-L6-v2` fallback (384d → 1536 zero-pad) |
+| RAG ingestion + hybrid search | ✅ Real | PyMuPDF + tiktoken chunking; pgvector cosine + BM25 + RRF (k=60, vec 0.7 / bm25 0.3); citations |
+| Docker sandbox | ✅ Real | `services/sandbox.py` `docker.from_env()`, network_disabled, mem 256m, cpu_quota 50000, read_only, tmpfs, no-new-privileges, cap_drop ALL; regex fallback if no Docker |
+| LangGraph agent — 6 of 7 nodes | ✅ Real | `classify_intent`, `researcher`, `coder`, `reviewer`, `self_heal`, `format_response` all make real LLM/sandbox calls; `graph.py` real `StateGraph` with conditional edges + retry loop |
 
-### Stage 3 Week 9 — Docker Sandbox (Today)
+### Backend — STUBBED / MISSING (the gaps that matter)
 
-**Goal**: Execute code in isolated Docker containers. Validate AI-generated SQL before it touches production databases.
+| Component | Status | Evidence |
+|-----------|--------|----------|
+| **MCP Executor (write-back)** | ❌ **STUB** | `agents/nodes/mcp_executor.py` docstring says "placeholder for real Model Context Protocol execution (Stage 3)"; returns hardcoded `{"status":"simulated","message":"MCP execution placeholder — real execution will be wired in Stage 3 Week 11"}` |
+| **`mcp_client.py`** | ❌ **MISSING** | No such file exists. The write-path has no transport. |
+| **Stripe billing** | ❌ **NOT IMPLEMENTED** | `stripe` is in `pyproject.toml` deps but never imported anywhere. `usage_tracker.py` + `usage.py` are pure DB aggregation. `UsageRecord` has no `stripe_customer_id`/`plan`/`subscription_id`. `config.py` has no `STRIPE_SECRET_KEY`. |
+| Low-severity TODOs | ⚠️ Minor | `main.py:115` CORS tighten; `auth.py:76` slug collision; `ws.py:67` pass; `behavior_rules.py:40` returns None |
 
-**What the Reviewer + Sandbox does**:
+> **Consequence:** "WRITE path: schema-grounded SQL → validation → MCP execution" is true up to validation. The final execution is simulated. An agent told to write data will report success without writing anything.
 
-```
-Coder generates SQL
-    ↓
-Reviewer node receives generated_code + schema_graph
-    ↓
-Sandbox spins up ephemeral Docker container (python:3.12-slim)
-    ↓
-Container runs validation script with ONLY stdlib (re, json)
-    - Checks for dangerous SQL ops (DROP, TRUNCATE, ALTER, CREATE, GRANT, REVOKE, COPY FROM)
-    - Checks for SQL injection patterns (tautologies, comment injection)
-    - Checks write queries are parameterized ($1, $2 notation)
-    - Checks column names actually exist in schema graph
-    - Prints JSON result to stdout: {"passed": true/false, "errors": [...]}
-    ↓
-If passed → MCP Executor sends to client's actual DB
-If failed → Self-Heal node fixes + retries (max 3)
-```
+### Frontend — REAL DATA, BROKEN AUTH
 
-**Docker container security**:
-- `network_disabled: True` — no network access
-- `mem_limit: 256m` — capped memory
-- `cpu_quota: 50000` — 0.5 CPU core
-- `read_only: True` — no writes to container filesystem
-- `tmpfs: /tmp size=64m` — isolated temp space only
-- `security_opt: no-new-privileges:true` — can't escalate
-- `cap_drop: ALL` — all kernel capabilities removed
-- `remove: True` — auto-destroyed after execution
-- Timeout: 30 seconds
+| Area | Status | Evidence |
+|------|--------|----------|
+| API client | ✅ Real | `lib/api.ts` sends `X-API-Key` from `localStorage('flux_api_key')` (client) / `globalApiKey` (server). No hardcoded key; no header if missing. |
+| BFF proxy | ✅ Real | `app/api/[...path]/route.ts` injects `process.env.BACKEND_API_KEY` (single shared key) |
+| WebSocket | ✅ Real | `lib/ws.ts` `ws://NEXT_PUBLIC_WS_URL/ws/{tenantId}?token={apiKey}`, auto-reconnect 3s |
+| 10 real-data pages | ✅ Real | dashboard, connections (hardcoded `db_type:postgresql` only), connections/[id], chat, docs, events (live WS), events/webhooks, settings/api, settings/billing (+behavior-rules CRUD). **Zero mock arrays anywhere.** |
+| schema/page.tsx | ⚠️ Placeholder | static "select a connection" text; TODO aggregate schemas |
+| settings/page.tsx | ⚠️ Partial | model selector disabled ("future update") |
+| events/[eventId], docs/[docId], chat/[conversationId] | ⚠️ Stubs | each just `redirect()` |
+| **Login / signup page** | ❌ **MISSING** | none exists |
+| **Auth guard on `/dashboard`** | ❌ **MISSING** | dashboard is wide open |
+| **Frontend OIDC flow** | ❌ **MISSING** | backend OIDC ready; frontend never calls it |
+| **Onboarding (mint first key)** | ❌ **MISSING** | bootstrap paradox: need API key to mint API key; `tenant_id` hand-set in localStorage with no UI |
 
-**Fallback**: If Docker daemon unavailable → runs same validation in-process (no isolation but same checks).
+### Quality / Infra — NEAR ABSENT
 
-**API endpoint**: `POST /api/v1/sandbox/execute` — execute arbitrary Python or SQL validation in sandbox.
+| Area | Status | Evidence |
+|------|--------|----------|
+| Backend tests | ❌ ~0% biz logic | only `backend/tests/test_health.py` (1 fn, `GET /health`) + empty `__init__.py`; no `conftest`/`pytest.ini`; `pytest-cov` not installed (README's `pytest --cov=src` would fail) |
+| Frontend tests | ❌ None | zero files/config/deps; `@playwright/test` is only a transitive lock entry, not in `package.json`; no vitest |
+| CI/CD | ❌ None | no `.github/` directory; no pipeline |
+| Pre-commit | ❌ None | — |
+| Lint/type | ⚠️ Configured, unenforced | backend ruff (line 100, py312, E/F/I/N/W/UP/B/C4/SIM) + mypy strict; frontend eslint (next core-web-vitals+ts) + tsconfig strict — none run in CI |
+| Docker | ⚠️ Dev-only | backend `Dockerfile` single-stage `python:3.12-slim`, installs `[dev]`, runs as **root**, no healthcheck; `docker-compose.yml` has PG+Redis healthchecks but backend has `--reload` + volume mount + no healthcheck; **no frontend service, no frontend Dockerfile, no prod override** |
+| "Vitest + Playwright 80% coverage" | ❌ Fiction | it is a TODO item, not a built feature |
 
-**Files created today**:
-- `backend/src/services/sandbox.py` — `DockerSandboxService` class (146 lines)
-- `backend/src/api/v1/sandbox.py` — Sandbox API router
-- Updated: `backend/src/agents/nodes/reviewer.py` (delegates to sandbox)
-- Updated: `backend/src/main.py` (register sandbox router)
-- Updated: `backend/src/core/config.py` (sandbox settings)
-- Updated: `backend/pyproject.toml` (docker dep, split ml extra)
-- Updated: `docker-compose.yml` (mount docker.sock for sandbox)
-- Updated: `Dockerfile` (remove uv, use pip directly)
-- Updated: `.env.template` (sandbox config vars)
-- Updated: `README.md` (quick start commands, API table, status)
+---
 
+## Honest Status Table
 
-### Stage 3 Weeks 10-12 — Event Gateway + Usage Tracking (Today)
+| Component | Real? |
+|-----------|-------|
+| Monorepo scaffold | ✅ |
+| Multi-tenant DB schema (10 tables, 3 migrations) | ✅ |
+| Tenant isolation (triple-layer) | ✅ |
+| Auth backend (API key + OIDC) | ✅ |
+| Schema reflection + Redis cache | ✅ |
+| LLM integration (OpenRouter + local fallback) | ✅ |
+| RAG ingestion + hybrid search + citations | ✅ |
+| Docker sandbox (validation) | ✅ |
+| LangGraph agent — read path | ✅ |
+| LangGraph agent — write path | ❌ **stops at simulated MCP node** |
+| Frontend data pages (10) | ✅ |
+| Frontend auth / onboarding | ❌ |
+| MCP write-back execution | ❌ stub |
+| Stripe billing | ❌ dep only, never wired |
+| Backend tests | ❌ ~0% |
+| Frontend tests | ❌ none |
+| CI/CD | ❌ none |
+| Prod Docker | ❌ dev-only |
 
-**Goal**: Real-time event system, webhook ingestion, async worker pool, usage tracking for billing.
+---
 
-**What was built**:
+## Three Blocking Gaps (must close to be a truthful product)
 
-| Component | What it does |
-|-----------|-------------|
-| WebSocket manager | Per-tenant connection pool, broadcast, dead connection cleanup, API key auth, ping/pong heartbeat |
-| Redis Pub/Sub | Per-tenant channels (`tenant:{id}:events`), async publish/subscribe, event bus for worker dispatch |
-| ARQ worker pool | Async job processing: load event → run LangGraph agent → update status → WS push → track usage. Max 10 concurrent, 3 retries, 300s timeout |
-| Webhook ingestion | `POST /webhooks/ingest/{hook_id}` — HMAC SHA256 signature validation → match behavior rules → create EventLog → publish Redis → return immediately |
-| Behavior rules engine | YAML-style rules per tenant. Operators: eq, ne, gt, lt, contains, in, starts_with. Nested JSON path resolution. Priority-sorted matching |
-| Event log | Full audit trail: `event_log` table with status (queued/processing/completed/failed), matched rules, agent run ID, result JSONB, timestamps |
-| Usage tracking | Monthly upsert per tenant: tokens_in, tokens_out, agent_runs, ws_events, storage_bytes. Summary + history APIs |
-| Frontend events page | Real-time WebSocket feed, status filters, live updates, priority badges, error display |
-| Webhook config UI | Create webhooks with secret display, copy URL, toggle active, delete |
-| Usage dashboard | 7 stat cards, bar chart history, behavior rules CRUD with dialog |
-| Live dashboard | Real-time stats: usage summary + connection/doc counts, 7 metric cards |
+1. **MCP write-back is fake.** Implement a real `mcp_client.py` (JSON-RPC) and wire `mcp_executor` to actually execute validated writes. Until then the headline feature ("agent writes back to your data") is non-functional.
+2. **No frontend auth / onboarding.** Add login page, dashboard auth guard, mint-first-key onboarding flow, and a tenant selector. Resolve the bootstrap paradox.
+3. **~0% tests + 0 CI.** Stand up pytest-cov backend tests (auth/tenant/agent/sandbox), vitest + playwright smoke tests, and a `.github/workflows/ci.yml` (lint → type → test → build).
 
-**DB migration 0003** (4 new tables):
-- `webhook_configs` — tenant-scoped webhook endpoints with HMAC secrets
-- `behavior_rules` — trigger conditions + agent actions, priority-sorted
-- `event_log` — full event audit trail with status tracking
-- `usage_records` — monthly usage aggregation for billing
+---
 
-**Files created**:
-- Backend: 10 new files (models, services, workers, API routers)
-- Frontend: 4 new pages (events, webhooks, billing/usage, dashboard stats)
-- Updated: `main.py`, `graph.py`, `api.ts`, `ws.ts`, `sidebar.tsx`, `dialog.tsx`
-
-### UI/UX Refactor Phase 0 — Foundation (Today)
-
-**Goal**: Rebuild frontend foundation with proper shadcn components, error handling, typed API client, and comprehensive codebase audit.
-
-**What was built**:
-
-| Component | What it does |
-|-----------|-------------|
-| 23 shadcn/ui primitives | select, tabs, tooltip, dropdown-menu, scroll-area, accordion, toggle, switch, checkbox, popover, separator, label, textarea, avatar, slider, alert-dialog, radio-group, progress, hover-card, navigation-menu, sheet, table, command |
-| Radix Dialog replacement | Replaced custom Dialog with @radix-ui/react-dialog — focus trap, escape, ARIA |
-| ErrorBoundary | React class component with fallback UI, catches render errors |
-| Toast helpers | sonner wrapper — success/error/info/warning/loading/promise |
-| Providers component | QueryClient + Toaster + ErrorBoundary + TooltipProvider wrapper |
-| Full codebase audit | 52 backend + 46 frontend files audited, ~200 comments added |
-| Critical bug fixes | RAG tuple unpack, embedder dim padding, API key expiry enforcement |
-| Frontend fixes | WS URL env var, reconnect guard, non-JSON response handling, form validation, delete confirmations |
-
-**Dependencies added (77 packages)**:
-- `@tanstack/react-query` — data fetching
-- 20 Radix UI primitives
-- `cmdk` — command palette
-- `next-themes` — theme provider
-
-**Bug fixes**:
-- Backend: `rag.py` — `llm_complete` returns `(str, int)` tuple, was assigned to single var. Fixed with proper unpack
-- Backend: `llm.py` — Local fallback embedder produces 384-dim, DB expects 1536. Fixed with zero-padding
-- Backend: `deps.py` — API key `expires_at` not enforced. Fixed with expiry check
-- Frontend: `ws.ts` — Hardcoded `ws://localhost:8000`. Fixed with `NEXT_PUBLIC_WS_URL` env var
-- Frontend: `ws.ts` — Reconnect on clean close. Fixed with `wasClean` guard
-- Frontend: `api.ts` — Crash on non-JSON responses. Fixed with content-type check
-- Frontend: `connections/page.tsx` — NaN port, no validation, no delete confirm. All fixed
-- Frontend: `events/page.tsx` — Tenant fallback to "default". Fixed — requires tenant_id
-
-## Status
-
-| Component | Status |
-|-----------|--------|
-| Project concept & requirements | Done |
-| Monorepo scaffold | Done (`backend/` + `frontend/` + `docs/`) |
-| Docker dev environment | Done (PG16+pgvector, Redis 7, FastAPI) |
-| Multi-tenant DB schema | Done (10 tables + 3 Alembic migrations) |
-| FastAPI core + auth | Done (API keys + OIDC dual auth) |
-| Schema reflection engine | Done (asyncpg `information_schema` → JSON → Redis) |
-| LLM integration | Done (OpenRouter, schema-grounded queries) |
-| RAG ingestion pipeline | Done (PyMuPDF, tiktoken chunker, pgvector store) |
-| Hybrid search + citations | Done (pgvector + BM25 + RRF fusion) |
-| LangGraph agent (7 nodes) | Done (classify → research/code → review → self-heal → exec → format) |
-| Frontend dashboard | Done (Next.js 16, 15 pages, dark-first theme) |
-| Docker sandbox execution | Done (Docker SDK, ephemeral container, reviewer integration) |
-| Event Gateway (WS + Redis) | Done (WebSocket manager, Pub/Sub, heartbeat) |
-| Webhooks + behavior rules | Done (HMAC validation, rule matching, async dispatch) |
-| ARQ worker pool | Done (event processing, agent execution, usage tracking) |
-| Usage tracking + billing prep | Done (monthly aggregation, summary/history APIs) |
-
-## Confirmed Decisions
+## Confirmed Decisions (unchanged)
 
 | Decision | Choice |
 |----------|--------|
 | LLM provider | OpenRouter (model-flexible) |
 | Embedding model | OpenRouter / fallback all-MiniLM-L6-v2 |
 | Repo structure | Monorepo |
-| Auth | OAuth/OIDC from day 1 |
-| DB scope | PostgreSQL-only |
+| Auth | OAuth/OIDC from day 1 (backend only so far) |
+| DB scope | PostgreSQL-only (MVP) |
 
-## Built Files
+---
 
-```
-backend/src/
-├── main.py
-├── core/ (config, tenant, security, oidc, redis_client, security_middleware)
-├── db/ (models, session, tenant_isolation, migrations/[0001_initial, 0002_rag, 0003_event_gateway])
-├── api/ (deps, v1/[auth, api_keys, connections, schema_endpoints, query, rag, agent, sandbox, events, webhooks, behavior_rules, ws, usage])
-├── agents/ (state, graph, 7 nodes)
-├── services/ (schema_reflection, schema_cache, llm, rag_ingestion, rag_query, sandbox, websocket_manager, event_bus, behavior_rules, webhook_service, usage_tracker)
-└── workers/ (tasks.py — ARQ WorkerSettings, process_event, run_agent_task)
+## Corrected Roadmap (sequenced by truth, not by hype)
 
-frontend/src/
-├── app/
-│   ├── globals.css                  # Dark-first CSS vars (shadcn/ui tokens)
-│   ├── layout.tsx                    # RootLayout (Geist, ThemeProvider, Toaster)
-│   ├── page.tsx                      # Redirect → /dashboard
-│   ├── dashboard/
-│   │   ├── layout.tsx               # DashboardLayout (Sidebar + Header)
-│   │   ├── page.tsx                  # Dashboard Home (live stats, 7 metric cards)
-│   │   ├── connections/
-│   │   │   ├── page.tsx             # Connection list + add dialog
-│   │   │   └── [id]/page.tsx        # Schema explorer per connection
-│   │   ├── schema/page.tsx          # Global schema view
-│   │   ├── chat/
-│   │   │   ├── page.tsx             # Agent Chat (messages + citations + animations)
-│   │   │   └── [conversationId]/page.tsx
-│   │   ├── docs/
-│   │   │   ├── page.tsx             # Document list + drag-drop upload
-│   │   │   └── [docId]/page.tsx
-│   │   ├── events/
-│   │   │   ├── page.tsx             # Real-time event feed (WS, filters, live updates)
-│   │   │   ├── [eventId]/page.tsx
-│   │   │   └── webhooks/page.tsx    # Webhook config (create, secret, toggle, delete)
-│   │   └── settings/
-│   │       ├── page.tsx             # Theme toggle + model selector
-│   │       ├── api/page.tsx         # API key management (CRUD)
-│   │       └── billing/page.tsx     # Usage dashboard (stats, chart, behavior rules CRUD)
-│   └── api/[...path]/route.ts       # BFF proxy → FastAPI backend
-├── components/
-│   ├── theme-provider.tsx            # Dark-first with system detection
-│   ├── sidebar.tsx                   # Collapsible nav (8 items incl. Webhooks)
-│   ├── header.tsx                    # Theme toggle + notifications
-│   ├── error-boundary.tsx            # React ErrorBoundary with fallback UI
-│   ├── providers.tsx                 # QueryClient + Toaster + ErrorBoundary + TooltipProvider
-│   └── ui/                           # 29 shadcn/ui primitives (Radix-based)
-│       ├── accordion.tsx, alert-dialog.tsx, avatar.tsx, badge.tsx, button.tsx
-│       ├── card.tsx, checkbox.tsx, command.tsx, dialog.tsx, dropdown-menu.tsx
-│       ├── hover-card.tsx, input.tsx, label.tsx, navigation-menu.tsx
-│       ├── popover.tsx, progress.tsx, radio-group.tsx, scroll-area.tsx
-│       ├── select.tsx, separator.tsx, sheet.tsx, skeleton.tsx, slider.tsx
-│       ├── switch.tsx, table.tsx, tabs.tsx, textarea.tsx, toggle.tsx, tooltip.tsx
-└── lib/
-    ├── utils.ts                      # cn() helper
-    ├── api.ts                        # ApiClient (connections, schema, query, rag, keys, events, webhooks, rules, usage)
-    ├── toast.ts                      # sonner wrapper (success/error/info/warning/loading/promise)
-    └── ws.ts                         # WebSocket client (env-based URL, wasClean guard, tenant-scoped)
+The previous "Next Actions" jumped to marketplace / multi-modal / SSO. That is premature while the core write-path is stubbed and there are no tests. Correct order:
 
-docs/
-├── PROJECT_PLAN.md
-├── CURRENT_STATE.md
-├── architecture/ (system-overview, agent-topology, security-model, data-flow)
-├── modules/ (schema-engine, rag-engine, sandbox-execution, event-gateway, sdk)
-├── frontend/ (routes, ui-components)
-└── roadmap/ (stage-1-core, stage-2-product, stage-3-scale, future-goals)
-```
+### P0 — Make it TRUE (in progress)
+- **P0.1** Real MCP client + wire `mcp_executor` to real execution
+- **P0.2** Frontend auth: login page + dashboard guard + onboarding (mint first key) + tenant selector
+- **P0.3** Test foundation: pytest-cov backend (≥60% on auth/tenant/agent/sandbox) + vitest/playwright smoke + `.github/workflows/ci.yml`
 
-## Test Status
+### P1 — Make it SHIPPABLE
+- Prod Docker (multi-stage, non-root, healthchecks, frontend Dockerfile, compose prod override)
+- Real Stripe (subscription + webhook + plan-gating on existing usage meter)
+- Finish the 3 stub pages + schema aggregation + model selector
 
-- `ruff check src/` (backend) — All checks passed
-- `uvicorn` startup — Clean, no import errors, Redis connects
-- `next build` (frontend) — All 17 routes compile successfully
-- `eslint src/` (frontend) — 0 errors, 0 warnings
-- DB migrations — All 3 applied (0001_initial, 0002_rag, 0003_event_gateway)
+### P2 — SCALE
+- Connectors beyond Postgres (MySQL / Mongo / REST / GraphQL)
+- K8s, read replicas, Redis cluster, RBAC
 
-## Dependencies
+### P3 — PLATFORM
+- Marketplace, multi-modal RAG, SSO/SAML/SOC2, SDKs/CLI, zero-code agent builder
 
-```
-frontend/package.json:
-  next 16.2.6, react 19.2.4, react-dom 19.2.4
-  react-hook-form, zod, @hookform/resolvers
-  motion (Framer Motion), sonner, next-themes
-  lucide-react, react-dropzone
-  @tanstack/react-query, cmdk
-  class-variance-authority, clsx, tailwind-merge
-  tailwindcss 4, @tailwindcss/postcss
-  @radix-ui/* (20 packages: dialog, select, tabs, tooltip, dropdown-menu,
-    scroll-area, accordion, toggle, switch, checkbox, popover, separator,
-    label, avatar, slider, alert-dialog, radio-group, progress, hover-card,
-    navigation-menu)
-```
+---
 
-## Git Branches
+## Test Status (verified)
 
-```
-main (1ad61e9)           ← Stage 1 + Stage 2 W5-6
-  ← develop              ← + Stage 2 W7-8 + Stage 3 W9-12 + Phase 0 UI Foundation
-```
+- `ruff check src/` — configured (not run in CI)
+- `pytest` — only `test_health.py` exists; `pytest --cov` fails (pytest-cov not installed)
+- `next build` — compiles
+- frontend tests — none exist
+- DB migrations — 3 present (0001_initial, 0002_rag, 0003_event_gateway)
 
-## Environment
-
-```
-Working directory: /home/hairzee/prods/Flux_gateway
-OS: Linux · Shell: zsh
-Docker: postgres (pgvector), redis
-Node: 22.22.0 · npm: 10.9.4
-```
-
-## Next Actions
-
-1. **Phase 1: Core UX** — Dashboard rewrite (animated stats, recharts), file upload system (drag-drop, Excel/CSV), loading skeletons, mobile nav, data tables, form components
-2. **Phase 2: Animations** — Page transitions, stagger lists, micro-interactions, chat streaming, events real-time animations
-3. Stripe integration — wire usage records to Stripe billing API
-4. Admin dashboard — tenant management, system health monitoring
-5. Documentation — API docs (OpenAPI/Swagger), Storybook, user guides
-6. Testing — Vitest + Playwright + 80%+ coverage
-7. Production deployment — Docker Compose prod, CI/CD pipeline, monitoring
+---
 
 ## Blockers
 
-- None. Stage 3 complete.
+- **MCP write-back stub** blocks the core product promise.
+- **No frontend auth** blocks any real user onboarding.
+- **No tests / CI** blocks safe iteration on the above.
